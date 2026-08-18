@@ -4,6 +4,8 @@ import mime from 'mime-types';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import archiver from 'archiver';
+import { v4 as uuidv4 } from 'uuid';
 import { query, get, run, logActivity } from '../db/database.js';
 import { saveObjectFile, deleteObjectFile, streamPartialFile, calculateMD5, getBucketDir } from '../services/storageEngine.js';
 
@@ -13,6 +15,15 @@ const upload = multer({ dest: path.join(process.cwd(), 'data/temp') });
 const CHUNKS_DIR = path.join(process.cwd(), 'data/temp_chunks');
 if (!fs.existsSync(CHUNKS_DIR)) {
   fs.mkdirSync(CHUNKS_DIR, { recursive: true });
+}
+
+// Helper: Structured Path Generator {user}/{YYYY-MM-DD}/{guid}/{file_name}
+function generateStructuredObjectKey(userId, originalFileName) {
+  const user = userId && userId.trim() ? userId.trim() : 'user_default';
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const guid = uuidv4();
+  const safeFileName = path.basename(originalFileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+  return `${user}/${today}/${guid}/${safeFileName}`;
 }
 
 // GET /api/buckets/:bucket/objects - List objects
@@ -48,6 +59,17 @@ router.get('/buckets/:bucket/objects', async (req, res) => {
   }
 });
 
+// GET /api/buckets/:bucket/trash - List soft-deleted objects (Trash Bin)
+router.get('/buckets/:bucket/trash', async (req, res) => {
+  try {
+    const bucketName = req.params.bucket;
+    const objects = await query(`SELECT * FROM objects WHERE bucket_name = ? AND is_deleted = 1`, [bucketName]);
+    res.json({ success: true, objects });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Single file upload
 router.post('/storage/:bucket/upload', upload.single('file'), async (req, res) => {
   try {
@@ -64,36 +86,42 @@ router.post('/storage/:bucket/upload', upload.single('file'), async (req, res) =
       return res.status(404).json({ success: false, error: 'Bucket not found' });
     }
 
-    const customKey = req.body.key || req.body.object_key;
-    const objectKey = customKey ? customKey.replace(/^\/+/, '') : file.originalname;
+    const userId = req.body.user_id || 'user_default';
+    const useStructuredPath = req.body.structured_path === 'true' || req.body.structured_path === '1';
+
+    let objectKey = req.body.key || req.body.object_key;
+    if (useStructuredPath || !objectKey) {
+      objectKey = generateStructuredObjectKey(userId, file.originalname);
+    } else {
+      objectKey = objectKey.replace(/^\/+/, '');
+    }
+
     const contentType = file.mimetype || mime.lookup(file.originalname) || 'application/octet-stream';
     const isPublic = req.body.is_public === 'true' || req.body.is_public === '1' ? 1 : bucket.is_public;
 
     const savedInfo = await saveObjectFile(bucketName, objectKey, file.path);
 
     const existing = await get(
-      `SELECT id, file_path FROM objects WHERE bucket_name = ? AND object_key = ?`,
+      `SELECT id, file_path, version_id FROM objects WHERE bucket_name = ? AND object_key = ? INCLUDING_DELETED`,
       [bucketName, objectKey]
     );
 
-    if (existing) {
-      if (existing.file_path !== savedInfo.filePath) {
-        deleteObjectFile(existing.file_path);
-      }
+    const newVersionId = `v${Date.now()}`;
 
+    if (existing) {
       await run(
-        `UPDATE objects SET size_bytes = ?, content_type = ?, etag = ?, is_public = ?, file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        [savedInfo.sizeBytes, contentType, savedInfo.etag, isPublic, savedInfo.filePath, existing.id]
+        `UPDATE objects SET size_bytes = ?, content_type = ?, etag = ?, is_public = ?, file_path = ?, version_id = ? WHERE id = ?`,
+        [savedInfo.sizeBytes, contentType, savedInfo.etag, isPublic, savedInfo.filePath, newVersionId, existing.id]
       );
     } else {
       await run(
-        `INSERT INTO objects (bucket_name, object_key, file_name, file_path, size_bytes, content_type, etag, is_public) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [bucketName, objectKey, file.originalname, savedInfo.filePath, savedInfo.sizeBytes, contentType, savedInfo.etag, isPublic]
+        `INSERT INTO objects (bucket_name, object_key, file_name, file_path, size_bytes, content_type, etag, is_public, user_id, version_id) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [bucketName, objectKey, file.originalname, savedInfo.filePath, savedInfo.sizeBytes, contentType, savedInfo.etag, isPublic, userId, newVersionId]
       );
     }
 
-    await logActivity('UPLOAD_OBJECT', bucketName, objectKey, `Size: ${savedInfo.sizeBytes} bytes, ETag: ${savedInfo.etag}`);
+    await logActivity('UPLOAD_OBJECT', bucketName, objectKey, `Size: ${savedInfo.sizeBytes} bytes, StructuredPath: ${useStructuredPath}`);
 
     const objectMeta = await get(
       `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
@@ -114,9 +142,8 @@ router.post('/storage/:bucket/upload', upload.single('file'), async (req, res) =
   }
 });
 
-// --- HIGH-PERFORMANCE MULTIPART RESUMABLE CHUNKED UPLOAD ENDPOINTS ---
+// --- MULTIPART CHUNKED UPLOAD ENDPOINTS ---
 
-// Helper function to append chunk file asynchronously via streaming without blocking event loop or RAM
 function appendChunkFileStream(sourcePath, targetStream) {
   return new Promise((resolve, reject) => {
     const readStream = fs.createReadStream(sourcePath);
@@ -126,23 +153,20 @@ function appendChunkFileStream(sourcePath, targetStream) {
   });
 }
 
-// 1. Initiate Multipart Upload
+// 1. Initiate Multipart Upload (Supports Structured Pathing)
 router.post('/storage/:bucket/multipart/initiate', async (req, res) => {
   try {
     const { bucket: bucketName } = req.params;
-    const { object_key, file_name, total_chunks, file_size } = req.body;
+    const { object_key, file_name, total_chunks, file_size, user_id, structured_path } = req.body;
 
     const bucket = await get(`SELECT * FROM buckets WHERE name = ?`, [bucketName]);
     if (!bucket) {
       return res.status(404).json({ success: false, error: 'Bucket not found' });
     }
 
-    const usageRow = await get(
-      `SELECT COALESCE(SUM(size_bytes), 0) as total FROM objects WHERE bucket_name = ?`,
-      [bucketName]
-    );
-    if ((usageRow.total + (file_size || 0)) > bucket.quota_bytes) {
-      return res.status(400).json({ success: false, error: 'Bucket storage quota exceeded' });
+    let finalKey = object_key;
+    if (structured_path || !finalKey) {
+      finalKey = generateStructuredObjectKey(user_id || 'user_default', file_name || object_key);
     }
 
     const uploadId = 'upload_' + Date.now() + '_' + crypto.randomBytes(6).toString('hex');
@@ -152,6 +176,7 @@ router.post('/storage/:bucket/multipart/initiate', async (req, res) => {
     res.json({
       success: true,
       uploadId,
+      objectKey: finalKey,
       message: 'Multipart upload initiated'
     });
   } catch (err) {
@@ -159,7 +184,7 @@ router.post('/storage/:bucket/multipart/initiate', async (req, res) => {
   }
 });
 
-// 2. Upload Chunk (Async file operation)
+// 2. Upload Chunk
 router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (req, res) => {
   try {
     const { uploadId, chunkIndex } = req.body;
@@ -193,11 +218,11 @@ router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (r
   }
 });
 
-// 3. Complete Multipart Upload (Async Stream Merge)
+// 3. Complete Multipart Upload
 router.post('/storage/:bucket/multipart/complete', async (req, res) => {
   try {
     const { bucket: bucketName } = req.params;
-    const { uploadId, object_key, file_name, content_type } = req.body;
+    const { uploadId, object_key, file_name, content_type, user_id } = req.body;
 
     const uploadDir = path.join(CHUNKS_DIR, uploadId);
     if (!fs.existsSync(uploadDir)) {
@@ -218,7 +243,6 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
       await fs.promises.mkdir(targetDir, { recursive: true });
     }
 
-    // Sort chunk files numerically
     const files = (await fs.promises.readdir(uploadDir))
       .filter(f => f.startsWith('chunk_'))
       .sort((a, b) => parseInt(a.split('_')[1], 10) - parseInt(b.split('_')[1], 10));
@@ -238,7 +262,6 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
       writeStream.on('error', reject);
     });
 
-    // Cleanup upload folder
     try { await fs.promises.rmdir(uploadDir); } catch (_) {}
 
     const etag = await calculateMD5(targetFilePath);
@@ -246,20 +269,22 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
     const finalContentType = content_type || mime.lookup(file_name) || 'application/octet-stream';
 
     const existing = await get(
-      `SELECT id FROM objects WHERE bucket_name = ? AND object_key = ?`,
+      `SELECT id FROM objects WHERE bucket_name = ? AND object_key = ? INCLUDING_DELETED`,
       [bucketName, normalizedKey]
     );
 
+    const newVersionId = `v${Date.now()}`;
+
     if (existing) {
       await run(
-        `UPDATE objects SET size_bytes = ?, content_type = ?, etag = ?, file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        [stats.size, finalContentType, etag, targetFilePath, existing.id]
+        `UPDATE objects SET size_bytes = ?, content_type = ?, etag = ?, file_path = ?, version_id = ? WHERE id = ?`,
+        [stats.size, finalContentType, etag, targetFilePath, newVersionId, existing.id]
       );
     } else {
       await run(
-        `INSERT INTO objects (bucket_name, object_key, file_name, file_path, size_bytes, content_type, etag, is_public) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [bucketName, normalizedKey, file_name || normalizedKey, targetFilePath, stats.size, finalContentType, etag, bucket.is_public]
+        `INSERT INTO objects (bucket_name, object_key, file_name, file_path, size_bytes, content_type, etag, is_public, user_id, version_id) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [bucketName, normalizedKey, file_name || normalizedKey, targetFilePath, stats.size, finalContentType, etag, bucket.is_public, user_id || 'user_default', newVersionId]
       );
     }
 
@@ -276,7 +301,75 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
       object: objectMeta
     });
   } catch (err) {
-    console.error('Multipart complete error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/storage/:bucket/download-zip - Stream Dynamic ZIP of selected objects
+router.post('/storage/:bucket/download-zip', async (req, res) => {
+  try {
+    const bucketName = req.params.bucket;
+    const { keys = [] } = req.body;
+
+    if (!keys || keys.length === 0) {
+      return res.status(400).json({ success: false, error: 'No object keys provided for ZIP archive' });
+    }
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${bucketName}-export-${Date.now()}.zip"`);
+
+    archive.pipe(res);
+
+    for (const key of keys) {
+      const object = await get(
+        `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
+        [bucketName, key]
+      );
+      if (object && fs.existsSync(object.file_path)) {
+        archive.file(object.file_path, { name: object.object_key });
+      }
+    }
+
+    await archive.finalize();
+  } catch (err) {
+    console.error('ZIP Stream error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/storage/:bucket/restore - Restore soft-deleted object from Trash Bin
+router.post('/storage/:bucket/restore', async (req, res) => {
+  try {
+    const bucketName = req.params.bucket;
+    const { object_key } = req.body;
+
+    const object = await get(
+      `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ? INCLUDING_DELETED`,
+      [bucketName, object_key]
+    );
+
+    if (!object) {
+      return res.status(404).json({ success: false, error: 'Object not found' });
+    }
+
+    await run(`UPDATE objects SET IS_DELETED = 0 WHERE id = ?`, [object.id]);
+    await logActivity('RESTORE_OBJECT', bucketName, object_key, `Object restored from Trash Bin`);
+
+    res.json({ success: true, message: `Object ${object_key} restored successfully` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/storage/:bucket/versions - List object versions
+router.get('/storage/:bucket/versions', async (req, res) => {
+  try {
+    const { object_key } = req.query;
+    const versions = await query(`SELECT * FROM OBJECT_VERSIONS WHERE object_key = ?`, [object_key]);
+    res.json({ success: true, versions });
+  } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -312,14 +405,15 @@ router.get('/storage/:bucket/*', async (req, res) => {
   }
 });
 
-// DELETE /api/storage/:bucket/* - Delete object
+// DELETE /api/storage/:bucket/* - Soft Delete or Permanent Delete
 router.delete('/storage/:bucket/*', async (req, res) => {
   try {
     const bucketName = req.params.bucket;
     const objectKey = decodeURIComponent(req.params[0]);
+    const isPermanent = req.query.permanent === 'true';
 
     const object = await get(
-      `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
+      `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ? INCLUDING_DELETED`,
       [bucketName, objectKey]
     );
 
@@ -327,12 +421,16 @@ router.delete('/storage/:bucket/*', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Object not found' });
     }
 
-    deleteObjectFile(object.file_path);
-
-    await run(`DELETE FROM objects WHERE id = ?`, [object.id]);
-    await logActivity('DELETE_OBJECT', bucketName, objectKey, `Object deleted`);
-
-    res.json({ success: true, message: `Object ${objectKey} deleted successfully` });
+    if (isPermanent) {
+      deleteObjectFile(object.file_path);
+      await run(`DELETE FROM objects WHERE id = ?`, [object.id]);
+      await logActivity('PERMANENT_DELETE_OBJECT', bucketName, objectKey, `Object permanently purged`);
+      res.json({ success: true, message: `Object ${objectKey} permanently deleted` });
+    } else {
+      await run(`UPDATE objects SET IS_DELETED = 1 WHERE id = ?`, [object.id]);
+      await logActivity('SOFT_DELETE_OBJECT', bucketName, objectKey, `Object moved to Trash Bin`);
+      res.json({ success: true, message: `Object ${objectKey} moved to Trash Bin` });
+    }
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

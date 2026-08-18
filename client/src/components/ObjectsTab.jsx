@@ -16,30 +16,50 @@ import {
   X, 
   Folder, 
   HardDrive,
-  Layers
+  Layers,
+  Archive,
+  RotateCcw,
+  History,
+  User,
+  GitBranch,
+  ShieldCheck,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 
-// Direct backend URL when running on Vite dev server (port 3000) to bypass Vite proxy timeouts for multi-gigabyte uploads
 const API_BASE = typeof window !== 'undefined' && window.location.port === '3000' 
   ? 'http://localhost:5000' 
   : '';
 
 export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket, onGeneratePresigned }) {
   const [objects, setObjects] = useState([]);
+  const [trashObjects, setTrashObjects] = useState([]);
+  const [viewMode, setViewMode] = useState('active'); // 'active' or 'trash'
+  
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [copiedKey, setCopiedKey] = useState(null);
   const [previewObj, setPreviewObj] = useState(null);
+  const [versionsModalObj, setVersionsModalObj] = useState(null);
+  const [versionsList, setVersionsList] = useState([]);
   const [dragActive, setDragActive] = useState(false);
+
+  // Structured Pathing Options
+  const [useStructuredPath, setUseStructuredPath] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState('user_101');
+
+  // Multi-select for ZIP download
+  const [selectedKeys, setSelectedKeys] = useState([]);
 
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     if (selectedBucket) {
       fetchObjects();
+      fetchTrash();
     }
-  }, [selectedBucket, search]);
+  }, [selectedBucket, search, viewMode]);
 
   async function fetchObjects() {
     if (!selectedBucket) return;
@@ -58,27 +78,41 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     }
   }
 
-  // High-performance direct-to-backend Multipart Uploader
+  async function fetchTrash() {
+    if (!selectedBucket) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/buckets/${selectedBucket}/trash`);
+      const data = await res.json();
+      if (data.success) {
+        setTrashObjects(data.objects || []);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // 3-Parallel Worker Pool for High-Speed Multipart Upload
   async function handleFileUpload(files) {
     if (!files || files.length === 0 || !selectedBucket) return;
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
 
-      // Dynamic chunk size: 50MB for files > 5GB, 20MB for files > 500MB, 10MB default
       let chunkSize = 10 * 1024 * 1024;
       if (file.size > 5 * 1024 * 1024 * 1024) {
-        chunkSize = 50 * 1024 * 1024; // 50MB chunks for 5GB - 100GB+ files
+        chunkSize = 50 * 1024 * 1024;
       } else if (file.size > 500 * 1024 * 1024) {
-        chunkSize = 20 * 1024 * 1024; // 20MB chunks
+        chunkSize = 20 * 1024 * 1024;
       }
 
       if (file.size > 20 * 1024 * 1024) {
-        await uploadLargeFileInChunks(file, chunkSize);
+        await uploadLargeFileParallelChunks(file, chunkSize);
       } else {
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('key', file.name);
+        formData.append('user_id', currentUserId);
+        formData.append('structured_path', useStructuredPath ? 'true' : 'false');
+        if (!useStructuredPath) formData.append('key', file.name);
 
         setUploadProgress({ 
           fileName: file.name, 
@@ -103,10 +137,10 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     fetchObjects();
   }
 
-  async function uploadLargeFileInChunks(file, chunkSize) {
+  // Parallel Chunk Uploader (Concurrency pool = 3)
+  async function uploadLargeFileParallelChunks(file, chunkSize) {
     const totalChunks = Math.ceil(file.size / chunkSize);
 
-    // 1. Initiate Session directly on Express Backend
     const initRes = await fetch(`${API_BASE}/api/storage/${selectedBucket}/multipart/initiate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -114,7 +148,9 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
         object_key: file.name,
         file_name: file.name,
         total_chunks: totalChunks,
-        file_size: file.size
+        file_size: file.size,
+        user_id: currentUserId,
+        structured_path: useStructuredPath
       })
     });
     const initData = await initRes.json();
@@ -123,11 +159,15 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       return;
     }
 
-    const uploadId = initData.uploadId;
+    const { uploadId, objectKey } = initData;
+    let completedCount = 0;
 
-    // 2. Upload Chunks Sequentially with Auto-Retry & Direct Backend Socket
-    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-      const start = chunkIndex * chunkSize;
+    // Parallel upload pool (3 workers in parallel)
+    const CONCURRENCY = 3;
+    const chunkIndices = Array.from({ length: totalChunks }, (_, idx) => idx);
+
+    async function worker(index) {
+      const start = index * chunkSize;
       const end = Math.min(file.size, start + chunkSize);
       const chunkBlob = file.slice(start, end);
 
@@ -138,9 +178,9 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
         try {
           attempts++;
           const chunkData = new FormData();
-          chunkData.append('chunk', chunkBlob, `chunk_${chunkIndex}`);
+          chunkData.append('chunk', chunkBlob, `chunk_${index}`);
           chunkData.append('uploadId', uploadId);
-          chunkData.append('chunkIndex', chunkIndex);
+          chunkData.append('chunkIndex', index);
 
           const res = await fetch(`${API_BASE}/api/storage/${selectedBucket}/multipart/chunk`, {
             method: 'POST',
@@ -151,36 +191,43 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
             success = true;
           }
         } catch (err) {
-          console.warn(`Parça ${chunkIndex + 1} deneme ${attempts} başarısız, tekrar deneniyor...`);
           await new Promise(r => setTimeout(r, 1500));
         }
       }
 
-      if (!success) {
-        alert(`Parça ${chunkIndex + 1}/${totalChunks} yüklenemedi. Ağ bağlantınızı kontrol edin.`);
-        return;
-      }
+      if (!success) throw new Error(`Chunk ${index} failed`);
 
-      const percent = Math.round(((chunkIndex + 1) / totalChunks) * 100);
+      completedCount++;
+      const percent = Math.round((completedCount / totalChunks) * 100);
       setUploadProgress({
-        fileName: file.name,
-        currentChunk: chunkIndex + 1,
+        fileName: objectKey || file.name,
+        currentChunk: completedCount,
         totalChunks,
         percent,
-        mode: `Özel Parçalı (${Math.round(chunkSize / (1024*1024))}MB Parçalar)`
+        mode: `3x Paralel Parçalı (${Math.round(chunkSize / (1024*1024))}MB)`
       });
-
-      // Yield event loop briefly
-      await new Promise(r => setTimeout(r, 10));
     }
 
-    // 3. Complete & Merge All Chunks
+    // Execute queue in parallel workers
+    const queue = [...chunkIndices];
+    async function runPoolWorker() {
+      while (queue.length > 0) {
+        const item = queue.shift();
+        if (item !== undefined) {
+          await worker(item);
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: CONCURRENCY }, () => runPoolWorker()));
+
+    // Complete session
     setUploadProgress({
-      fileName: file.name + " (Sunucuda Birleştiriliyor...)",
+      fileName: (objectKey || file.name) + " (Sunucuda Birleştiriliyor...)",
       currentChunk: totalChunks,
       totalChunks,
       percent: 99,
-      mode: 'Son İşlem: Diskte Birleştiriliyor'
+      mode: 'Diskte Birleştiriliyor'
     });
 
     const compRes = await fetch(`${API_BASE}/api/storage/${selectedBucket}/multipart/complete`, {
@@ -188,9 +235,10 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         uploadId,
-        object_key: file.name,
+        object_key: objectKey || file.name,
         file_name: file.name,
-        content_type: file.type
+        content_type: file.type,
+        user_id: currentUserId
       })
     });
 
@@ -200,8 +248,32 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     }
   }
 
-  async function handleDeleteObject(objectKey) {
-    if (!window.confirm(`"${objectKey}" nesnesini silmek istediğinize emin misiniz?`)) return;
+  // ZIP Stream Download for Selected Files
+  async function handleDownloadZIP() {
+    if (selectedKeys.length === 0) {
+      alert('Lütfen ZIP olarak indirmek istediğiniz dosyaları seçin.');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/storage/${selectedBucket}/download-zip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keys: selectedKeys })
+      });
+
+      const blob = await res.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${selectedBucket}-export-${Date.now()}.zip`;
+      link.click();
+    } catch (err) {
+      alert('ZIP indirme hatası: ' + err.message);
+    }
+  }
+
+  async function handleSoftDelete(objectKey) {
+    if (!window.confirm(`"${objectKey}" nesnesi Geri Dönüşüm Kutusu'na taşınsın mı?`)) return;
 
     try {
       const res = await fetch(`${API_BASE}/api/storage/${selectedBucket}/${encodeURIComponent(objectKey)}`, {
@@ -210,9 +282,71 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       const data = await res.json();
       if (data.success) {
         fetchObjects();
+        fetchTrash();
+      }
+    } catch (err) {
+      alert('Hata: ' + err.message);
+    }
+  }
+
+  async function handleRestoreFromTrash(objectKey) {
+    try {
+      const res = await fetch(`${API_BASE}/api/storage/${selectedBucket}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ object_key: objectKey })
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchObjects();
+        fetchTrash();
+      }
+    } catch (err) {
+      alert('Geri yükleme hatası: ' + err.message);
+    }
+  }
+
+  async function handlePermanentDelete(objectKey) {
+    if (!window.confirm(`"${objectKey}" nesnesi KALICI OLARAK silinsin mi? Bu işlem geri alınamaz!`)) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/storage/${selectedBucket}/${encodeURIComponent(objectKey)}?permanent=true`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchTrash();
       }
     } catch (err) {
       alert('Silme hatası: ' + err.message);
+    }
+  }
+
+  async function fetchVersions(objectKey) {
+    try {
+      const res = await fetch(`${API_BASE}/api/storage/${selectedBucket}/versions?object_key=${encodeURIComponent(objectKey)}`);
+      const data = await res.json();
+      if (data.success) {
+        setVersionsList(data.versions || []);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function toggleSelectKey(key) {
+    if (selectedKeys.includes(key)) {
+      setSelectedKeys(selectedKeys.filter(k => k !== key));
+    } else {
+      setSelectedKeys([...selectedKeys, key]);
+    }
+  }
+
+  function toggleSelectAll() {
+    if (selectedKeys.length === objects.length) {
+      setSelectedKeys([]);
+    } else {
+      setSelectedKeys(objects.map(o => o.object_key));
     }
   }
 
@@ -243,42 +377,61 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
   return (
     <div className="space-y-8 animate-fadeIn">
       
-      {/* Top Controls */}
-      <div className="glass-panel p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        
-        {/* Bucket Dropdown */}
-        <div className="flex items-center space-x-3">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Hedef Bucket:</span>
-          <select
-            value={selectedBucket || ''}
-            onChange={(e) => setSelectedBucket(e.target.value)}
-            className="bg-slate-950 border border-blue-500/30 rounded-xl px-4 py-2.5 text-sm text-white font-bold focus:outline-none focus:border-blue-500 transition shadow-inner"
-          >
-            {buckets.map((b) => (
-              <option key={b.id} value={b.name}>
-                🪣 {b.name} ({b.object_count || 0} nesne)
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* Structured Pathing & Controls Bar */}
+      <div className="glass-panel p-6 space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          
+          {/* Bucket Dropdown */}
+          <div className="flex items-center space-x-3">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Bucket:</span>
+            <select
+              value={selectedBucket || ''}
+              onChange={(e) => setSelectedBucket(e.target.value)}
+              className="bg-slate-950 border border-blue-500/30 rounded-xl px-4 py-2.5 text-sm text-white font-bold focus:outline-none focus:border-blue-500 shadow-inner"
+            >
+              {buckets.map((b) => (
+                <option key={b.id} value={b.name}>🪣 {b.name} ({b.object_count || 0} nesne)</option>
+              ))}
+            </select>
+          </div>
 
-        {/* Search */}
-        <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
-          <input 
-            type="text"
-            placeholder="Nesne adı veya ETag ara..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono transition"
-          />
-          {search && (
-            <button onClick={() => setSearch('')} className="absolute right-3 top-3 text-slate-400 hover:text-white">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
+          {/* User ID & Structured Path Config */}
+          <div className="flex items-center space-x-4 bg-slate-950/80 border border-white/10 rounded-xl px-4 py-2 text-xs">
+            <div className="flex items-center space-x-2">
+              <User className="w-4 h-4 text-blue-400" />
+              <span className="text-slate-400 font-medium">User ID:</span>
+              <input 
+                type="text"
+                value={currentUserId}
+                onChange={(e) => setCurrentUserId(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 font-mono text-white text-xs w-24 focus:outline-none focus:border-blue-500"
+              />
+            </div>
 
+            <label className="flex items-center space-x-2 cursor-pointer border-l border-slate-800 pl-4">
+              <input 
+                type="checkbox"
+                checked={useStructuredPath}
+                onChange={(e) => setUseStructuredPath(e.target.checked)}
+                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+              <span className="text-slate-200 font-semibold">Otomatik Pathing ({`user/date/guid/file`})</span>
+            </label>
+          </div>
+
+          {/* Search */}
+          <div className="relative w-full lg:w-72">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+            <input 
+              type="text"
+              placeholder="Nesne adı veya ETag ara..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
+            />
+          </div>
+
+        </div>
       </div>
 
       {/* Drag & Drop Upload Zone */}
@@ -310,10 +463,12 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
         </div>
 
         <h3 className="mt-4 font-bold text-white text-lg tracking-tight">
-          Dosyaları buraya sürükleyip bırakın (10GB - 100GB+ Destekli)
+          Dosyaları buraya sürükleyip bırakın (3x Paralel Parçalı Yükleme)
         </h3>
         <p className="text-xs text-slate-400 mt-1 font-medium">
-          Direkt Motor Bağlantılı • Bucket: <span className="text-blue-400 font-mono font-bold">{selectedBucket}</span>
+          Hedef Yol: <span className="text-cyan-300 font-mono font-bold">
+            {useStructuredPath ? `${currentUserId}/${new Date().toISOString().split('T')[0]}/[GUID]/[DOSYA]` : 'Direkt İsim'}
+          </span>
         </p>
 
         {uploadProgress && (
@@ -333,177 +488,282 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
         )}
       </div>
 
-      {/* Objects Table */}
+      {/* Main Table Container: Active Files vs Trash Bin Tabs */}
       <div className="glass-panel overflow-hidden">
-        <div className="p-5 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+        
+        {/* Table Header Controls */}
+        <div className="p-5 border-b border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setViewMode('active')}
+              className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition ${
+                viewMode === 'active' 
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' 
+                  : 'bg-slate-900 text-slate-400 hover:text-white'
+              }`}
+            >
               <HardDrive className="w-4 h-4" />
-            </div>
-            <h2 className="font-bold text-slate-200 text-base">S3 Nesneleri ({objects.length})</h2>
+              <span>Aktif Dosyalar ({objects.length})</span>
+            </button>
+
+            <button
+              onClick={() => setViewMode('trash')}
+              className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition ${
+                viewMode === 'trash' 
+                  ? 'bg-rose-600 text-white shadow-lg shadow-rose-500/20' 
+                  : 'bg-slate-900 text-slate-400 hover:text-white'
+              }`}
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Geri Dönüşüm Kutusu ({trashObjects.length})</span>
+            </button>
           </div>
+
+          {/* Action Bar for Active Files */}
+          {viewMode === 'active' && selectedKeys.length > 0 && (
+            <button 
+              onClick={handleDownloadZIP}
+              className="btn-accent py-2 px-4 text-xs font-bold animate-fadeIn"
+            >
+              <Archive className="w-4 h-4" />
+              <span>Seçilenleri ZIP İndir ({selectedKeys.length})</span>
+            </button>
+          )}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-bold border-b border-white/10 text-[11px]">
-              <tr>
-                <th className="px-5 py-3.5">Dosya Adı & Object Key</th>
-                <th className="px-5 py-3.5">Boyut</th>
-                <th className="px-5 py-3.5">MIME Tipi</th>
-                <th className="px-5 py-3.5 font-mono">ETag (MD5)</th>
-                <th className="px-5 py-3.5">Yüklenme Tarihi</th>
-                <th className="px-5 py-3.5 text-right">İşlemler</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {loading ? (
+        {/* ACTIVE FILES TABLE */}
+        {viewMode === 'active' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-300">
+              <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-bold border-b border-white/10 text-[11px]">
                 <tr>
-                  <td colSpan="6" className="text-center py-12 text-slate-500">
-                    <div className="inline-flex items-center space-x-2">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                      <span>Nesneler Yükleniyor...</span>
-                    </div>
-                  </td>
+                  <th className="px-4 py-3.5 w-10">
+                    <button onClick={toggleSelectAll} className="text-slate-400 hover:text-white">
+                      {selectedKeys.length === objects.length && objects.length > 0 ? (
+                        <CheckSquare className="w-4 h-4 text-blue-400" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="px-4 py-3.5">Dosya Yolu & Object Key</th>
+                  <th className="px-4 py-3.5">Boyut</th>
+                  <th className="px-4 py-3.5 font-mono">ETag / Sürüm</th>
+                  <th className="px-4 py-3.5">Kullanıcı</th>
+                  <th className="px-4 py-3.5 text-right">İşlemler</th>
                 </tr>
-              ) : objects.length > 0 ? (
-                objects.map((obj) => {
-                  const directUrl = `${API_BASE || window.location.origin}/api/storage/${obj.bucket_name}/${encodeURIComponent(obj.object_key)}`;
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {loading ? (
+                  <tr>
+                    <td colSpan="6" className="text-center py-12 text-slate-500">Yükleniyor...</td>
+                  </tr>
+                ) : objects.length > 0 ? (
+                  objects.map((obj) => {
+                    const directUrl = `${API_BASE || window.location.origin}/api/storage/${obj.bucket_name}/${encodeURIComponent(obj.object_key)}`;
+                    const isSelected = selectedKeys.includes(obj.object_key);
 
-                  return (
-                    <tr key={obj.id} className="hover:bg-slate-900/60 transition duration-150 group">
-                      <td className="px-5 py-4">
-                        <div className="flex items-center space-x-3">
-                          <div className="p-2 rounded-xl bg-slate-900 border border-white/5 group-hover:border-blue-500/30 transition">
-                            {getFileIcon(obj.content_type)}
+                    return (
+                      <tr key={obj.id} className={`hover:bg-slate-900/60 transition ${isSelected ? 'bg-blue-950/20' : ''}`}>
+                        <td className="px-4 py-4">
+                          <button onClick={() => toggleSelectKey(obj.object_key)} className="text-slate-400 hover:text-white">
+                            {isSelected ? <CheckSquare className="w-4 h-4 text-blue-400" /> : <Square className="w-4 h-4" />}
+                          </button>
+                        </td>
+                        <td className="px-4 py-4">
+                          <div className="flex items-center space-x-3">
+                            <div className="p-2 rounded-xl bg-slate-900 border border-white/5">
+                              {getFileIcon(obj.content_type)}
+                            </div>
+                            <div>
+                              <span 
+                                onClick={() => setPreviewObj({ ...obj, directUrl })}
+                                className="font-bold text-white hover:text-blue-400 cursor-pointer block text-sm font-mono truncate max-w-md"
+                              >
+                                {obj.object_key}
+                              </span>
+                              <span className="text-[11px] text-slate-400 font-sans">{obj.file_name}</span>
+                            </div>
                           </div>
-                          <div>
-                            <span 
-                              onClick={() => setPreviewObj({ ...obj, directUrl })}
-                              className="font-bold text-white hover:text-blue-400 cursor-pointer block text-sm transition"
-                            >
-                              {obj.object_key}
-                            </span>
-                            <span className="text-[11px] text-slate-400 font-mono">{obj.file_name}</span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 font-mono text-slate-200 font-semibold">{formatBytes(obj.size_bytes)}</td>
-                      <td className="px-5 py-4">
-                        <span className="bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-md text-[10px] text-slate-300 font-mono">
-                          {obj.content_type}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 font-mono text-[11px] text-slate-400">
-                        <span className="bg-slate-950 px-2 py-0.5 rounded border border-white/5">{obj.etag}</span>
-                      </td>
-                      <td className="px-5 py-4 text-slate-400 whitespace-nowrap text-[11px]">
-                        {new Date(obj.created_at).toLocaleString('tr-TR')}
-                      </td>
-                      <td className="px-5 py-4 text-right space-x-1.5 whitespace-nowrap">
-                        {/* Preview */}
-                        <button 
-                          onClick={() => setPreviewObj({ ...obj, directUrl })}
-                          className="btn-subtle p-2 text-xs" 
-                          title="Önizle"
-                        >
-                          <Eye className="w-4 h-4 text-slate-300" />
-                        </button>
+                        </td>
+                        <td className="px-4 py-4 font-mono text-slate-200 font-semibold">{formatBytes(obj.size_bytes)}</td>
+                        <td className="px-4 py-4 font-mono text-[11px] text-slate-400">
+                          <span className="bg-slate-950 px-2 py-0.5 rounded border border-white/5">{obj.etag}</span>
+                          <span className="ml-2 text-cyan-400 font-bold bg-cyan-950/60 px-1.5 py-0.5 rounded">{obj.version_id || 'v1'}</span>
+                        </td>
+                        <td className="px-4 py-4 text-slate-400 font-mono text-xs">
+                          <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded">{obj.user_id || 'user_default'}</span>
+                        </td>
+                        <td className="px-4 py-4 text-right space-x-1.5 whitespace-nowrap">
+                          {/* Versions */}
+                          <button 
+                            onClick={() => { setVersionsModalObj(obj); fetchVersions(obj.object_key); }}
+                            className="btn-subtle p-2 text-xs text-amber-400 hover:text-amber-300"
+                            title="Sürüm Geçmişi"
+                          >
+                            <History className="w-4 h-4" />
+                          </button>
 
-                        {/* Presigned */}
-                        <button 
-                          onClick={() => onGeneratePresigned(obj.bucket_name, obj.object_key)}
-                          className="btn-subtle p-2 text-xs text-cyan-400 hover:text-cyan-300"
-                          title="İmzalı Bağlantı Oluştur"
-                        >
-                          <Link2 className="w-4 h-4" />
-                        </button>
+                          {/* Preview */}
+                          <button 
+                            onClick={() => setPreviewObj({ ...obj, directUrl })}
+                            className="btn-subtle p-2 text-xs" 
+                            title="Önizle"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
 
-                        {/* Copy URL */}
-                        <button 
-                          onClick={() => copyToClipboard(directUrl, obj.id)}
-                          className="btn-subtle p-2 text-xs"
-                          title="Direkt URL Kopyala"
-                        >
-                          {copiedKey === obj.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                        </button>
+                          {/* Presigned */}
+                          <button 
+                            onClick={() => onGeneratePresigned(obj.bucket_name, obj.object_key)}
+                            className="btn-subtle p-2 text-xs text-cyan-400"
+                            title="İmzalı URL"
+                          >
+                            <Link2 className="w-4 h-4" />
+                          </button>
 
-                        {/* Delete */}
+                          {/* Copy URL */}
+                          <button 
+                            onClick={() => copyToClipboard(directUrl, obj.id)}
+                            className="btn-subtle p-2 text-xs"
+                            title="URL Kopyala"
+                          >
+                            {copiedKey === obj.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                          </button>
+
+                          {/* Soft Delete */}
+                          <button 
+                            onClick={() => handleSoftDelete(obj.object_key)}
+                            className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/25 transition"
+                            title="Çöp Kutusu'na Taşı"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan="6" className="text-center py-16 text-slate-500">Kayıtlı dosya yok.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* TRASH BIN TABLE */}
+        {viewMode === 'trash' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-300">
+              <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-bold border-b border-white/10 text-[11px]">
+                <tr>
+                  <th className="px-5 py-3.5">Silinen Dosya Yolu</th>
+                  <th className="px-5 py-3.5">Boyut</th>
+                  <th className="px-5 py-3.5">Kullanıcı</th>
+                  <th className="px-5 py-3.5 text-right">İşlemler</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {trashObjects.length > 0 ? (
+                  trashObjects.map((obj) => (
+                    <tr key={obj.id} className="hover:bg-slate-900/60">
+                      <td className="px-5 py-4 font-mono text-slate-300 font-semibold">{obj.object_key}</td>
+                      <td className="px-5 py-4 font-mono text-slate-400">{formatBytes(obj.size_bytes)}</td>
+                      <td className="px-5 py-4 font-mono text-slate-400">{obj.user_id}</td>
+                      <td className="px-5 py-4 text-right space-x-2">
                         <button 
-                          onClick={() => handleDeleteObject(obj.object_key)}
-                          className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/25 transition"
-                          title="Sil"
+                          onClick={() => handleRestoreFromTrash(obj.object_key)}
+                          className="btn-accent py-1.5 px-3 text-xs bg-emerald-600 hover:bg-emerald-500"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Geri Yükle (Restore)</span>
+                        </button>
+                        <button 
+                          onClick={() => handlePermanentDelete(obj.object_key)}
+                          className="btn-danger py-1.5 px-3 text-xs"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Kalıcı Sil</span>
                         </button>
                       </td>
                     </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan="6" className="text-center py-16 text-slate-500">
-                    <div className="space-y-2">
-                      <Folder className="w-10 h-10 mx-auto text-slate-700" />
-                      <p className="text-sm font-medium">Bu bucket'ta kayıtlı nesne yok.</p>
-                      <p className="text-xs text-slate-400 font-normal">Yukarıdaki alana dosya sürükleyip bırakabilirsiniz.</p>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="4" className="text-center py-16 text-slate-500">Geri Dönüşüm Kutusu boş.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
       </div>
 
       {/* File Preview Modal */}
       {previewObj && (
         <div className="modal-backdrop">
           <div className="glass-panel p-8 w-full max-w-2xl border border-slate-700 bg-slate-950 shadow-2xl relative">
-            <button 
-              onClick={() => setPreviewObj(null)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-900 transition"
-            >
+            <button onClick={() => setPreviewObj(null)} className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg">
               <X className="w-5 h-5" />
             </button>
-
             <div className="flex items-center space-x-3.5 mb-5">
-              <div className="p-3 rounded-xl bg-slate-900 border border-white/10">
-                {getFileIcon(previewObj.content_type)}
-              </div>
+              <div className="p-3 rounded-xl bg-slate-900 border border-white/10">{getFileIcon(previewObj.content_type)}</div>
               <div>
-                <h3 className="font-extrabold text-white text-lg">{previewObj.object_key}</h3>
+                <h3 className="font-extrabold text-white text-lg font-mono">{previewObj.object_key}</h3>
                 <p className="text-xs text-slate-400">{formatBytes(previewObj.size_bytes)} • {previewObj.content_type}</p>
               </div>
             </div>
-
             <div className="bg-slate-900 rounded-2xl p-4 border border-white/10 my-4 max-h-[400px] overflow-auto flex items-center justify-center">
               {previewObj.content_type.startsWith('image/') ? (
-                <img src={previewObj.directUrl} alt={previewObj.object_key} className="max-h-80 object-contain rounded-lg shadow-xl" />
+                <img src={previewObj.directUrl} alt={previewObj.object_key} className="max-h-80 object-contain rounded-lg" />
               ) : previewObj.content_type.startsWith('video/') ? (
-                <video controls src={previewObj.directUrl} className="w-full max-h-80 rounded-lg shadow-xl" />
-              ) : previewObj.content_type.startsWith('audio/') ? (
-                <audio controls src={previewObj.directUrl} className="w-full" />
+                <video controls src={previewObj.directUrl} className="w-full max-h-80 rounded-lg" />
               ) : (
-                <div className="text-center py-12 text-slate-400 text-sm space-y-2">
-                  <FileText className="w-12 h-12 mx-auto text-slate-600" />
-                  <p>Bu dosya türü için canlı önizleme desteklenmiyor.</p>
-                </div>
+                <p className="text-slate-400 text-sm py-10">Canlı önizleme mevcut değil.</p>
               )}
             </div>
-
             <div className="flex justify-between items-center pt-2">
-              <div className="text-xs text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-lg border border-white/5">
-                ETag: {previewObj.etag}
-              </div>
-              <a 
-                href={`${previewObj.directUrl}?download=true`} 
-                download
-                className="btn-accent"
-              >
+              <div className="text-xs text-slate-400 font-mono">ETag: {previewObj.etag}</div>
+              <a href={`${previewObj.directUrl}?download=true`} download className="btn-accent">
                 <Download className="w-4 h-4" />
                 <span>İndir</span>
               </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Versions History Modal */}
+      {versionsModalObj && (
+        <div className="modal-backdrop">
+          <div className="glass-panel p-8 w-full max-w-xl border border-slate-700 bg-slate-950 shadow-2xl relative">
+            <button onClick={() => setVersionsModalObj(null)} className="absolute top-5 right-5 text-slate-400 hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="font-bold text-white text-lg mb-1 flex items-center gap-2">
+              <History className="w-5 h-5 text-amber-400" />
+              <span>Sürüm Geçmişi</span>
+            </h3>
+            <p className="text-xs text-slate-400 mb-4 font-mono">{versionsModalObj.object_key}</p>
+
+            <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+              {versionsList.length > 0 ? (
+                versionsList.map((ver) => (
+                  <div key={ver.id} className="p-3 rounded-xl bg-slate-900 border border-white/5 flex items-center justify-between text-xs">
+                    <div>
+                      <span className="font-bold text-cyan-400 font-mono">{ver.version_id}</span>
+                      <span className="text-slate-400 ml-2">{formatBytes(ver.size_bytes)}</span>
+                      <p className="text-[11px] text-slate-500 mt-0.5">{new Date(ver.created_at).toLocaleString('tr-TR')}</p>
+                    </div>
+                    <span className="font-mono text-[10px] text-slate-400 bg-slate-950 px-2 py-1 rounded">{ver.etag}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-slate-500 text-xs py-6 text-center">Bu nesne için henüz eski sürüm bulunmuyor.</p>
+              )}
             </div>
           </div>
         </div>

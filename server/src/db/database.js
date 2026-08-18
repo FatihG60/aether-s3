@@ -16,6 +16,7 @@ const DB_FILE = path.join(DATA_DIR, 's3_storage.json');
 let state = {
   buckets: [],
   objects: [],
+  object_versions: [],
   api_keys: [],
   presigned_urls: [],
   activity_logs: []
@@ -30,7 +31,7 @@ function saveState() {
   }
 }
 
-// Load DB state from file
+// Load DB state from file and run migrations
 function loadState() {
   if (fs.existsSync(DB_FILE)) {
     try {
@@ -40,6 +41,19 @@ function loadState() {
       console.error('Failed to load DB file, starting fresh:', err);
     }
   }
+
+  // Ensure arrays exist
+  if (!state.object_versions) state.object_versions = [];
+
+  // Migration for objects schema
+  state.objects.forEach(obj => {
+    if (!obj.user_id) obj.user_id = 'user_default';
+    if (obj.is_latest === undefined) obj.is_latest = 1;
+    if (obj.is_deleted === undefined) obj.is_deleted = 0;
+    if (!obj.version_id) obj.version_id = 'v1';
+  });
+
+  saveState();
 }
 
 export async function initDatabase() {
@@ -52,7 +66,7 @@ export async function initDatabase() {
       name: 'general-storage',
       region: 'eu-central-1',
       is_public: 1,
-      quota_bytes: 10737418240, // 10 GB
+      quota_bytes: 1099511627776, // 1 TB
       created_at: new Date().toISOString()
     });
     saveState();
@@ -72,7 +86,7 @@ export async function initDatabase() {
     saveState();
   }
 
-  console.log('✅ Custom S3 Storage Engine Database initialized.');
+  console.log('✅ Custom S3 Storage Engine Database (Versioning & Trash Bin Enabled) initialized.');
 }
 
 // --- Query methods ---
@@ -83,7 +97,7 @@ export async function query(sql, params = []) {
   if (cleanSql.includes('FROM BUCKETS')) {
     if (cleanSql.includes('COUNT(O.ID)') || cleanSql.includes('LEFT JOIN OBJECTS')) {
       return state.buckets.map(b => {
-        const bucketObjs = state.objects.filter(o => o.bucket_name === b.name);
+        const bucketObjs = state.objects.filter(o => o.bucket_name === b.name && !o.is_deleted);
         const total_bytes = bucketObjs.reduce((acc, curr) => acc + (curr.size_bytes || 0), 0);
         return {
           ...b,
@@ -97,6 +111,13 @@ export async function query(sql, params = []) {
 
   if (cleanSql.includes('FROM OBJECTS')) {
     let result = [...state.objects];
+
+    // Filter Trash Bin vs Active
+    if (cleanSql.includes('IS_DELETED = 1')) {
+      result = result.filter(o => o.is_deleted === 1);
+    } else {
+      result = result.filter(o => !o.is_deleted);
+    }
 
     // Filter by bucket_name
     if (params[0] && typeof params[0] === 'string' && !cleanSql.includes('LIKE')) {
@@ -120,6 +141,11 @@ export async function query(sql, params = []) {
     return result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   }
 
+  if (cleanSql.includes('FROM OBJECT_VERSIONS')) {
+    const objectKey = params[0];
+    return state.object_versions.filter(v => v.object_key === objectKey).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }
+
   if (cleanSql.includes('FROM API_KEYS')) {
     return [...state.api_keys];
   }
@@ -139,7 +165,7 @@ export async function get(sql, params = []) {
     const b = state.buckets.find(item => item.name === bucketName);
     if (!b) return null;
 
-    const bucketObjs = state.objects.filter(o => o.bucket_name === b.name);
+    const bucketObjs = state.objects.filter(o => o.bucket_name === b.name && !o.is_deleted);
     const total_bytes = bucketObjs.reduce((acc, curr) => acc + (curr.size_bytes || 0), 0);
     return {
       ...b,
@@ -151,17 +177,21 @@ export async function get(sql, params = []) {
   if (cleanSql.includes('FROM OBJECTS')) {
     if (cleanSql.includes('SUM(SIZE_BYTES)') || cleanSql.includes('COALESCE')) {
       const bucketName = params[0];
-      const bucketObjs = state.objects.filter(o => o.bucket_name === bucketName);
+      const bucketObjs = state.objects.filter(o => o.bucket_name === bucketName && !o.is_deleted);
       const total = bucketObjs.reduce((acc, curr) => acc + (curr.size_bytes || 0), 0);
       return { total };
     }
     if (cleanSql.includes('BUCKET_NAME = ? AND OBJECT_KEY = ?')) {
       const [bucketName, objectKey] = params;
+      return state.objects.find(o => o.bucket_name === bucketName && o.object_key === objectKey && !o.is_deleted) || null;
+    }
+    if (cleanSql.includes('INCLUDING_DELETED')) {
+      const [bucketName, objectKey] = params;
       return state.objects.find(o => o.bucket_name === bucketName && o.object_key === objectKey) || null;
     }
     if (cleanSql.includes('COUNT(*)')) {
       const bucketName = params[0];
-      const count = state.objects.filter(o => o.bucket_name === bucketName).length;
+      const count = state.objects.filter(o => o.bucket_name === bucketName && !o.is_deleted).length;
       return { count };
     }
   }
@@ -192,7 +222,7 @@ export async function run(sql, params = []) {
       name,
       region: region || 'us-east-1',
       is_public: is_public ? 1 : 0,
-      quota_bytes: quota_bytes || 10737418240,
+      quota_bytes: quota_bytes || 1099511627776,
       created_at: new Date().toISOString()
     };
     state.buckets.push(newBucket);
@@ -222,7 +252,7 @@ export async function run(sql, params = []) {
   }
 
   if (cleanSql.startsWith('INSERT INTO OBJECTS')) {
-    const [bucket_name, object_key, file_name, file_path, size_bytes, content_type, etag, is_public] = params;
+    const [bucket_name, object_key, file_name, file_path, size_bytes, content_type, etag, is_public, user_id, version_id] = params;
     const newId = state.objects.length > 0 ? Math.max(...state.objects.map(o => o.id)) + 1 : 1;
     const newObj = {
       id: newId,
@@ -234,6 +264,10 @@ export async function run(sql, params = []) {
       content_type: content_type || 'application/octet-stream',
       etag,
       is_public: is_public ? 1 : 0,
+      user_id: user_id || 'user_default',
+      version_id: version_id || 'v1',
+      is_latest: 1,
+      is_deleted: 0,
       metadata_json: '{}',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -243,15 +277,69 @@ export async function run(sql, params = []) {
     return { lastID: newId, changes: 1 };
   }
 
+  if (cleanSql.startsWith('INSERT INTO OBJECT_VERSIONS')) {
+    const [object_id, bucket_name, object_key, file_name, file_path, size_bytes, content_type, etag, version_id] = params;
+    const newId = state.object_versions.length > 0 ? Math.max(...state.object_versions.map(v => v.id)) + 1 : 1;
+    state.object_versions.push({
+      id: newId,
+      object_id,
+      bucket_name,
+      object_key,
+      file_name,
+      file_path,
+      size_bytes,
+      content_type,
+      etag,
+      version_id,
+      created_at: new Date().toISOString()
+    });
+    saveState();
+    return { lastID: newId, changes: 1 };
+  }
+
   if (cleanSql.startsWith('UPDATE OBJECTS')) {
-    const [size_bytes, content_type, etag, is_public, file_path, id] = params;
+    if (cleanSql.includes('SET IS_DELETED = 1')) {
+      const id = params[0];
+      const obj = state.objects.find(o => o.id === id);
+      if (obj) {
+        obj.is_deleted = 1;
+        saveState();
+        return { changes: 1 };
+      }
+    }
+    if (cleanSql.includes('SET IS_DELETED = 0')) {
+      const id = params[0];
+      const obj = state.objects.find(o => o.id === id);
+      if (obj) {
+        obj.is_deleted = 0;
+        saveState();
+        return { changes: 1 };
+      }
+    }
+    const [size_bytes, content_type, etag, is_public, file_path, version_id, id] = params;
     const obj = state.objects.find(o => o.id === id);
     if (obj) {
+      // Archive current version into object_versions before updating
+      state.object_versions.push({
+        id: state.object_versions.length + 1,
+        object_id: obj.id,
+        bucket_name: obj.bucket_name,
+        object_key: obj.object_key,
+        file_name: obj.file_name,
+        file_path: obj.file_path,
+        size_bytes: obj.size_bytes,
+        content_type: obj.content_type,
+        etag: obj.etag,
+        version_id: obj.version_id || 'v1',
+        created_at: obj.updated_at || obj.created_at
+      });
+
       obj.size_bytes = size_bytes;
       obj.content_type = content_type;
       obj.etag = etag;
       obj.is_public = is_public;
       obj.file_path = file_path;
+      obj.version_id = version_id || `v${state.object_versions.filter(v => v.object_key === obj.object_key).length + 1}`;
       obj.updated_at = new Date().toISOString();
       saveState();
       return { changes: 1 };
@@ -292,28 +380,6 @@ export async function run(sql, params = []) {
     return { lastID: newId, changes: 1 };
   }
 
-  if (cleanSql.startsWith('INSERT INTO API_KEYS')) {
-    const [access_key, secret_key, name] = params;
-    const newId = state.api_keys.length > 0 ? Math.max(...state.api_keys.map(k => k.id)) + 1 : 1;
-    state.api_keys.push({
-      id: newId,
-      access_key,
-      secret_key,
-      name,
-      created_at: new Date().toISOString()
-    });
-    saveState();
-    return { lastID: newId, changes: 1 };
-  }
-
-  if (cleanSql.startsWith('DELETE FROM API_KEYS')) {
-    const id = params[0];
-    const initial = state.api_keys.length;
-    state.api_keys = state.api_keys.filter(k => k.id !== parseInt(id, 10));
-    saveState();
-    return { changes: initial - state.api_keys.length };
-  }
-
   return { changes: 0 };
 }
 
@@ -329,7 +395,6 @@ export async function logActivity(action, bucketName, objectKey, details) {
       timestamp: new Date().toISOString()
     });
 
-    // Cap logs at 200 items
     if (state.activity_logs.length > 200) {
       state.activity_logs = state.activity_logs.slice(0, 200);
     }
