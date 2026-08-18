@@ -47,10 +47,10 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
   const [objects, setObjects] = useState([]);
   const [commonPrefixes, setCommonPrefixes] = useState([]);
   const [currentPrefix, setCurrentPrefix] = useState('');
-  const [folderView, setFolderView] = useState(true); // Toggle Folder vs Flat view
+  const [folderView, setFolderView] = useState(true);
   
   const [trashObjects, setTrashObjects] = useState([]);
-  const [viewMode, setViewMode] = useState('active'); // 'active' or 'trash'
+  const [viewMode, setViewMode] = useState('active');
   
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
@@ -94,7 +94,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     }
   }, [selectedBucket, search, viewMode, currentPrefix, folderView]);
 
-  // Reset page when search or viewMode changes
   useEffect(() => {
     setCurrentPage(1);
   }, [search, viewMode, pageSize, sortField, sortDir, currentPrefix, folderView]);
@@ -138,7 +137,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     }
   }
 
-  // Handle Sort
   function handleSort(field) {
     if (sortField === field) {
       setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -148,7 +146,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     }
   }
 
-  // Get Sorted & Paginated Data
   const targetList = viewMode === 'active' ? objects : trashObjects;
   
   const sortedObjects = [...targetList].sort((a, b) => {
@@ -218,7 +215,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     fetchObjects();
   }
 
-  // Parallel Chunk Uploader (Concurrency pool = 3)
+  // Parallel Chunk Uploader
   async function uploadLargeFileParallelChunks(file, chunkSize) {
     const totalChunks = Math.ceil(file.size / chunkSize);
     const initialKey = currentPrefix ? `${currentPrefix}${file.name}` : file.name;
@@ -285,7 +282,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
         currentChunk: completedCount,
         totalChunks,
         percent,
-        mode: `3x Paralel Parçalı (${Math.round(chunkSize / (1024*1024))}MB)`
+        mode: `3x Paralel (${Math.round(chunkSize / (1024*1024))}MB)`
       });
     }
 
@@ -327,7 +324,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     }
   }
 
-  // ZIP Inspection & Extraction
   async function handleInspectZip(obj) {
     setInspectZipObj(obj);
     setZipLoading(true);
@@ -346,7 +342,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     }
   }
 
-  // Server-side Move / Rename
   function handleOpenMoveModal(obj) {
     setMoveObj(obj);
     setTargetKeyInput(obj.object_key);
@@ -380,7 +375,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     }
   }
 
-  // ZIP Stream Download for Selected Files
   async function handleDownloadZIP() {
     if (selectedKeys.length === 0) {
       alert('Lütfen ZIP olarak indirmek istediğiniz dosyaları seçin.');
@@ -517,18 +511,17 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     if (type === 'image') return <FileImage className="w-5 h-5 text-pink-400" />;
     if (type === 'video') return <FileVideo className="w-5 h-5 text-purple-400" />;
     if (type === 'audio') return <FileAudio className="w-5 h-5 text-amber-400" />;
-    if (type === 'text' || type === 'application') return <FileText className="w-5 h-5 text-blue-400" />;
+    if (type === 'text' || type === 'application') return <FileText className="w-5 h-5 text-indigo-400" />;
     return <File className="w-5 h-5 text-slate-400" />;
   }
 
   function renderSortIcon(field) {
     if (sortField !== field) return <ArrowUpDown className="w-3.5 h-3.5 text-slate-600 inline ml-1" />;
     return sortDir === 'asc' 
-      ? <ArrowUp className="w-3.5 h-3.5 text-blue-400 inline ml-1" />
-      : <ArrowDown className="w-3.5 h-3.5 text-blue-400 inline ml-1" />;
+      ? <ArrowUp className="w-3.5 h-3.5 text-indigo-400 inline ml-1" />
+      : <ArrowDown className="w-3.5 h-3.5 text-indigo-400 inline ml-1" />;
   }
 
-  // Breadcrumb breakdown
   const breadcrumbSegments = currentPrefix ? currentPrefix.split('/').filter(Boolean) : [];
 
   function navigateToBreadcrumb(index) {
@@ -544,7 +537,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     <div className="space-y-8 animate-fadeIn">
       
       {/* Structured Pathing & Controls Bar */}
-      <div className="glass-panel p-6 space-y-4">
+      <div className="glass-panel p-6 space-y-4 border border-indigo-500/20 bg-gradient-to-r from-[#0c0f18] via-[#101422] to-[#141226]">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           
           {/* Bucket Dropdown */}
@@ -553,7 +546,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
             <select
               value={selectedBucket || ''}
               onChange={(e) => { setSelectedBucket(e.target.value); setCurrentPrefix(''); }}
-              className="bg-slate-950 border border-blue-500/30 rounded-xl px-4 py-2.5 text-sm text-white font-bold focus:outline-none focus:border-blue-500 shadow-inner"
+              className="bg-[#080b13] border border-indigo-500/30 rounded-xl px-4 py-2.5 text-sm text-white font-bold focus:outline-none focus:border-indigo-500 shadow-inner"
             >
               {buckets.map((b) => (
                 <option key={b.id} value={b.name}>🪣 {b.name} ({b.object_count || 0} nesne)</option>
@@ -562,15 +555,15 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
           </div>
 
           {/* User ID & Structured Path Config */}
-          <div className="flex items-center space-x-4 bg-slate-950/80 border border-white/10 rounded-xl px-4 py-2 text-xs">
+          <div className="flex items-center space-x-4 bg-[#080b13]/80 border border-white/10 rounded-xl px-4 py-2 text-xs">
             <div className="flex items-center space-x-2">
-              <User className="w-4 h-4 text-blue-400" />
+              <User className="w-4 h-4 text-indigo-400" />
               <span className="text-slate-400 font-medium">User ID:</span>
               <input 
                 type="text"
                 value={currentUserId}
                 onChange={(e) => setCurrentUserId(e.target.value)}
-                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 font-mono text-white text-xs w-24 focus:outline-none focus:border-blue-500"
+                className="bg-[#0c101c] border border-slate-700/80 rounded px-2.5 py-1 font-mono text-white text-xs w-24 focus:outline-none focus:border-indigo-500"
               />
             </div>
 
@@ -579,7 +572,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                 type="checkbox"
                 checked={useStructuredPath}
                 onChange={(e) => setUseStructuredPath(e.target.checked)}
-                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
               />
               <span className="text-slate-200 font-semibold">Otomatik Pathing ({`user/date/guid/file`})</span>
             </label>
@@ -587,11 +580,11 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
 
           {/* View Mode Toggle & Search */}
           <div className="flex items-center space-x-3">
-            <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-1">
+            <div className="flex bg-[#080b13] border border-slate-800 rounded-xl p-1">
               <button
                 onClick={() => setFolderView(true)}
                 className={`p-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
-                  folderView ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                  folderView ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
                 }`}
                 title="Klasör Ağacı Görünümü"
               >
@@ -601,7 +594,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
               <button
                 onClick={() => setFolderView(false)}
                 className={`p-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
-                  !folderView ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                  !folderView ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
                 }`}
                 title="Düz Liste Görünümü"
               >
@@ -617,7 +610,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                 placeholder="Dosya veya ETag ara..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
+                className="w-full bg-[#080b13] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono shadow-inner"
               />
             </div>
           </div>
@@ -626,13 +619,13 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
 
         {/* 📂 BREADCRUMB FOLDER NAVIGATION BAR */}
         {folderView && !search && (
-          <div className="flex items-center space-x-2 pt-2 border-t border-white/5 text-xs text-slate-400 overflow-x-auto pb-1">
+          <div className="flex items-center space-x-2 pt-2 border-t border-white/[0.06] text-xs text-slate-400 overflow-x-auto pb-1">
             <span className="text-slate-500 font-bold uppercase tracking-wider text-[10px] shrink-0">Dizin:</span>
             
             <button
               onClick={() => navigateToBreadcrumb(-1)}
-              className={`hover:text-blue-400 font-bold px-2 py-1 rounded-lg bg-slate-900 border transition shrink-0 ${
-                !currentPrefix ? 'text-blue-400 border-blue-500/40' : 'text-slate-300 border-slate-800'
+              className={`hover:text-indigo-300 font-bold px-2.5 py-1 rounded-lg bg-[#080b13] border transition shrink-0 ${
+                !currentPrefix ? 'text-indigo-400 border-indigo-500/40' : 'text-slate-300 border-slate-800'
               }`}
             >
               🪣 {selectedBucket}
@@ -645,8 +638,8 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                   <ChevronBreadcrumb className="w-3.5 h-3.5 text-slate-600 shrink-0" />
                   <button
                     onClick={() => navigateToBreadcrumb(index)}
-                    className={`hover:text-blue-400 font-mono px-2 py-1 rounded-lg bg-slate-900 border transition shrink-0 ${
-                      isLast ? 'text-cyan-300 font-bold border-cyan-500/40 shadow-sm' : 'text-slate-300 border-slate-800'
+                    className={`hover:text-indigo-300 font-mono px-2.5 py-1 rounded-lg bg-[#080b13] border transition shrink-0 ${
+                      isLast ? 'text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-purple-300 font-bold border-indigo-500/40 shadow-sm' : 'text-slate-300 border-slate-800'
                     }`}
                   >
                     📁 {segment}
@@ -668,10 +661,10 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
           handleFileUpload(e.dataTransfer.files);
         }}
         onClick={() => fileInputRef.current?.click()}
-        className={`glass-panel p-10 border-2 border-dashed rounded-2xl cursor-pointer transition-all duration-200 text-center group relative overflow-hidden ${
+        className={`glass-panel p-10 border-2 border-dashed rounded-3xl cursor-pointer transition-all duration-200 text-center group relative overflow-hidden ${
           dragActive 
-            ? 'border-blue-500 bg-blue-500/10 scale-[1.01]' 
-            : 'border-slate-700/80 hover:border-blue-500/60 bg-slate-950/40 hover:bg-slate-900/60'
+            ? 'border-indigo-500 bg-indigo-500/10 scale-[1.01]' 
+            : 'border-indigo-500/30 hover:border-indigo-500/60 bg-[#0c0f18]/60 hover:bg-[#101424]/80'
         }`}
       >
         <input 
@@ -682,7 +675,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
           className="hidden" 
         />
         
-        <div className="w-14 h-14 mx-auto rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 group-hover:scale-110 transition duration-200 shadow-lg shadow-blue-500/10">
+        <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition duration-200 shadow-lg shadow-indigo-500/10">
           <UploadCloud className="w-7 h-7" />
         </div>
 
@@ -690,7 +683,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
           Dosyaları buraya sürükleyip bırakın (3x Paralel Parçalı Yükleme)
         </h3>
         <p className="text-xs text-slate-400 mt-1 font-medium">
-          Hedef Yol: <span className="text-cyan-300 font-mono font-bold">
+          Hedef Yol: <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-purple-300 font-mono font-bold">
             {useStructuredPath 
               ? `${currentUserId}/${new Date().toISOString().split('T')[0]}/[GUID]/[DOSYA]` 
               : currentPrefix ? `${currentPrefix}[DOSYA]` : 'Direkt İsim'}
@@ -698,16 +691,16 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
         </p>
 
         {uploadProgress && (
-          <div className="mt-5 max-w-md mx-auto p-4 rounded-xl bg-blue-950/90 border border-blue-500/40 text-xs text-blue-200 space-y-2 shadow-xl">
+          <div className="mt-5 max-w-md mx-auto p-4.5 rounded-2xl bg-[#090d18] border border-indigo-500/40 text-xs text-indigo-200 space-y-2 shadow-2xl">
             <div className="flex items-center justify-between">
               <span className="font-bold flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-cyan-400 animate-spin" />
+                <Layers className="w-4 h-4 text-indigo-400 animate-spin" />
                 <span>{uploadProgress.mode}: Parça {uploadProgress.currentChunk} / {uploadProgress.totalChunks}</span>
               </span>
-              <span className="font-mono font-bold text-cyan-300">%{uploadProgress.percent}</span>
+              <span className="font-mono font-bold text-indigo-300">%{uploadProgress.percent}</span>
             </div>
-            <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden">
-              <div className="h-full bg-cyan-400 rounded-full transition-all duration-200" style={{ width: `${uploadProgress.percent}%` }}></div>
+            <div className="w-full h-2 bg-[#05070d] rounded-full overflow-hidden p-0.5 border border-white/5">
+              <div className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 rounded-full transition-all duration-200" style={{ width: `${uploadProgress.percent}%` }}></div>
             </div>
             <span className="text-[11px] font-mono text-slate-400 block truncate">{uploadProgress.fileName}</span>
           </div>
@@ -715,17 +708,17 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       </div>
 
       {/* Main Table Container: Active Files vs Trash Bin Tabs */}
-      <div className="glass-panel overflow-hidden">
+      <div className="glass-panel overflow-hidden border border-white/[0.06] bg-[#070910]/70">
         
         {/* Table Header Controls */}
-        <div className="p-5 border-b border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="p-5 border-b border-white/[0.08] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
             <button
               onClick={() => setViewMode('active')}
               className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition ${
                 viewMode === 'active' 
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' 
-                  : 'bg-slate-900 text-slate-400 hover:text-white'
+                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/20' 
+                  : 'bg-[#0b0e18] text-slate-400 hover:text-white'
               }`}
             >
               <HardDrive className="w-4 h-4" />
@@ -737,7 +730,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
               className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition ${
                 viewMode === 'trash' 
                   ? 'bg-rose-600 text-white shadow-lg shadow-rose-500/20' 
-                  : 'bg-slate-900 text-slate-400 hover:text-white'
+                  : 'bg-[#0b0e18] text-slate-400 hover:text-white'
               }`}
             >
               <Trash2 className="w-4 h-4" />
@@ -749,7 +742,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
           {viewMode === 'active' && selectedKeys.length > 0 && (
             <button 
               onClick={handleDownloadZIP}
-              className="btn-accent py-2 px-4 text-xs font-bold animate-fadeIn"
+              className="btn-accent py-2 px-4 text-xs font-bold animate-fadeIn bg-gradient-to-r from-emerald-600 to-teal-600"
             >
               <Archive className="w-4 h-4" />
               <span>Seçilenleri ZIP İndir ({selectedKeys.length})</span>
@@ -761,12 +754,12 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
         {viewMode === 'active' && (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-bold border-b border-white/10 text-[11px]">
+              <thead className="bg-[#05070c] text-slate-400 uppercase tracking-wider font-bold border-b border-white/[0.08] text-[11px]">
                 <tr>
                   <th className="px-4 py-3.5 w-10">
                     <button onClick={toggleSelectAll} className="text-slate-400 hover:text-white">
                       {selectedKeys.length === objects.length && objects.length > 0 ? (
-                        <CheckSquare className="w-4 h-4 text-blue-400" />
+                        <CheckSquare className="w-4 h-4 text-indigo-400" />
                       ) : (
                         <Square className="w-4 h-4" />
                       )}
@@ -790,7 +783,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                   <th className="px-4 py-3.5 text-right">İşlemler</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
+              <tbody className="divide-y divide-white/[0.04]">
                 {/* Up-level button when inside subfolder */}
                 {folderView && currentPrefix && (
                   <tr 
@@ -799,7 +792,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                       parts.pop();
                       setCurrentPrefix(parts.length > 0 ? parts.join('/') + '/' : '');
                     }}
-                    className="hover:bg-slate-900/80 cursor-pointer bg-slate-950/40 text-blue-400 font-bold"
+                    className="hover:bg-white/[0.03] cursor-pointer bg-[#090c16]/50 text-indigo-400 font-bold"
                   >
                     <td className="px-4 py-3 text-center">📁</td>
                     <td colSpan="6" className="px-4 py-3 font-mono">.. (Üst Klasöre Çık)</td>
@@ -811,7 +804,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                   <tr 
                     key={folder.prefix}
                     onClick={() => setCurrentPrefix(folder.prefix)}
-                    className="hover:bg-slate-900/60 cursor-pointer transition group bg-slate-950/20"
+                    className="hover:bg-white/[0.03] cursor-pointer transition group bg-[#080a12]/40"
                   >
                     <td className="px-4 py-3.5 text-center text-amber-400">
                       <Folder className="w-5 h-5 mx-auto fill-amber-400/20 group-hover:scale-110 transition" />
@@ -824,7 +817,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                     <td className="px-4 py-3.5 text-slate-600">—</td>
                     <td className="px-4 py-3.5 text-slate-600">—</td>
                     <td className="px-4 py-3.5 text-right">
-                      <button className="btn-subtle py-1 px-2.5 text-xs text-cyan-400">Klasörü Aç ➔</button>
+                      <button className="btn-subtle py-1 px-2.5 text-xs text-indigo-400">Klasörü Aç ➔</button>
                     </td>
                   </tr>
                 ))}
@@ -840,21 +833,21 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                     const isZip = obj.object_key.endsWith('.zip') || obj.object_key.endsWith('.tar.gz');
 
                     return (
-                      <tr key={obj.id} className={`hover:bg-slate-900/60 transition ${isSelected ? 'bg-blue-950/20' : ''}`}>
+                      <tr key={obj.id} className={`hover:bg-white/[0.02] transition ${isSelected ? 'bg-indigo-950/30' : ''}`}>
                         <td className="px-4 py-4">
                           <button onClick={() => toggleSelectKey(obj.object_key)} className="text-slate-400 hover:text-white">
-                            {isSelected ? <CheckSquare className="w-4 h-4 text-blue-400" /> : <Square className="w-4 h-4" />}
+                            {isSelected ? <CheckSquare className="w-4 h-4 text-indigo-400" /> : <Square className="w-4 h-4" />}
                           </button>
                         </td>
                         <td className="px-4 py-4">
                           <div className="flex items-center space-x-3">
-                            <div className="p-1 rounded-xl bg-slate-900 border border-white/5 shrink-0 flex items-center justify-center">
+                            <div className="p-1 rounded-xl bg-[#090d18] border border-white/5 shrink-0 flex items-center justify-center">
                               {getFileIcon(obj.content_type, obj.object_key, obj.bucket_name)}
                             </div>
                             <div>
                               <span 
                                 onClick={() => setPreviewObj({ ...obj, directUrl })}
-                                className="font-bold text-white hover:text-blue-400 cursor-pointer block text-sm font-mono truncate max-w-xs sm:max-w-md"
+                                className="font-bold text-white hover:text-indigo-400 cursor-pointer block text-sm font-mono truncate max-w-xs sm:max-w-md"
                               >
                                 {folderView && currentPrefix ? obj.object_key.slice(currentPrefix.length) : obj.object_key}
                               </span>
@@ -864,17 +857,16 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                         </td>
                         <td className="px-4 py-4 font-mono text-slate-200 font-semibold">{formatBytes(obj.size_bytes)}</td>
                         <td className="px-4 py-4 font-mono text-[11px] text-slate-400">
-                          <span className="bg-slate-950 px-2 py-0.5 rounded border border-white/5">{obj.etag}</span>
-                          <span className="ml-2 text-cyan-400 font-bold bg-cyan-950/60 px-1.5 py-0.5 rounded">{obj.version_id || 'v1'}</span>
+                          <span className="bg-[#05070d] px-2 py-0.5 rounded border border-white/5">{obj.etag}</span>
+                          <span className="ml-2 text-indigo-400 font-bold bg-indigo-950/60 px-1.5 py-0.5 rounded">{obj.version_id || 'v1'}</span>
                         </td>
                         <td className="px-4 py-4 text-slate-400 font-mono text-xs">
-                          <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded">{obj.user_id || 'user_default'}</span>
+                          <span className="bg-[#090d18] border border-slate-800 px-2 py-0.5 rounded">{obj.user_id || 'user_default'}</span>
                         </td>
                         <td className="px-4 py-4 font-mono text-[11px] text-slate-400 whitespace-nowrap">
                           {new Date(obj.created_at).toLocaleString('tr-TR')}
                         </td>
                         <td className="px-4 py-4 text-right space-x-1.5 whitespace-nowrap">
-                          {/* ZIP Inspect button */}
                           {isZip && (
                             <button 
                               onClick={() => handleInspectZip(obj)}
@@ -885,7 +877,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                             </button>
                           )}
 
-                          {/* Move / Rename */}
                           <button 
                             onClick={() => handleOpenMoveModal(obj)}
                             className="btn-subtle p-2 text-xs text-indigo-400 hover:text-indigo-300"
@@ -894,7 +885,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                             <MoveRight className="w-4 h-4" />
                           </button>
 
-                          {/* Versions */}
                           <button 
                             onClick={() => { setVersionsModalObj(obj); fetchVersions(obj.object_key); }}
                             className="btn-subtle p-2 text-xs text-purple-400 hover:text-purple-300"
@@ -903,7 +893,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                             <History className="w-4 h-4" />
                           </button>
 
-                          {/* Preview */}
                           <button 
                             onClick={() => setPreviewObj({ ...obj, directUrl })}
                             className="btn-subtle p-2 text-xs" 
@@ -912,7 +901,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                             <Eye className="w-4 h-4" />
                           </button>
 
-                          {/* Presigned */}
                           <button 
                             onClick={() => onGeneratePresigned(obj.bucket_name, obj.object_key)}
                             className="btn-subtle p-2 text-xs text-cyan-400"
@@ -921,7 +909,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                             <Link2 className="w-4 h-4" />
                           </button>
 
-                          {/* Copy URL */}
                           <button 
                             onClick={() => copyToClipboard(directUrl, obj.id)}
                             className="btn-subtle p-2 text-xs"
@@ -930,7 +917,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                             {copiedKey === obj.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                           </button>
 
-                          {/* Soft Delete */}
                           <button 
                             onClick={() => handleSoftDelete(obj.object_key)}
                             className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/25 transition"
@@ -956,7 +942,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
         {viewMode === 'trash' && (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-bold border-b border-white/10 text-[11px]">
+              <thead className="bg-[#05070c] text-slate-400 uppercase tracking-wider font-bold border-b border-white/[0.08] text-[11px]">
                 <tr>
                   <th onClick={() => handleSort('object_key')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
                     Silinen Dosya Yolu {renderSortIcon('object_key')}
@@ -970,10 +956,10 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                   <th className="px-5 py-3.5 text-right">İşlemler</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
+              <tbody className="divide-y divide-white/[0.04]">
                 {paginatedObjects.length > 0 ? (
                   paginatedObjects.map((obj) => (
-                    <tr key={obj.id} className="hover:bg-slate-900/60">
+                    <tr key={obj.id} className="hover:bg-white/[0.02]">
                       <td className="px-5 py-4 font-mono text-slate-300 font-semibold">{obj.object_key}</td>
                       <td className="px-5 py-4 font-mono text-slate-400">{formatBytes(obj.size_bytes)}</td>
                       <td className="px-5 py-4 font-mono text-slate-400">{obj.user_id}</td>
@@ -1006,13 +992,13 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
         )}
 
         {/* PAGINATION FOOTER BAR */}
-        <div className="p-4 bg-slate-950/80 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-slate-400">
+        <div className="p-4 bg-[#05070c]/80 border-t border-white/[0.06] flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-slate-400">
           <div className="flex items-center space-x-3">
             <span>Sayfa Başına Göster:</span>
             <select
               value={pageSize}
               onChange={(e) => setPageSize(Number(e.target.value))}
-              className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-white text-xs font-mono focus:outline-none focus:border-blue-500"
+              className="bg-[#0b0e18] border border-slate-700/80 rounded-lg px-2.5 py-1 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
             >
               <option value={10}>10</option>
               <option value={25}>25</option>
@@ -1026,20 +1012,20 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
             <button
               onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
               disabled={currentPage === 1}
-              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
+              className="px-3 py-1.5 rounded-lg bg-[#0b0e18] border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
             >
               <ChevronLeft className="w-4 h-4" />
               <span>Önceki</span>
             </button>
 
-            <span className="px-3 py-1.5 font-mono text-xs font-bold text-slate-300 bg-slate-900 border border-white/5 rounded-lg">
+            <span className="px-3 py-1.5 font-mono text-xs font-bold text-slate-300 bg-[#0b0e18] border border-white/5 rounded-lg">
               Sayfa {currentPage} / {totalPages}
             </span>
 
             <button
               onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
               disabled={currentPage === totalPages}
-              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
+              className="px-3 py-1.5 rounded-lg bg-[#0b0e18] border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
             >
               <span>Sonraki</span>
               <ChevronRight className="w-4 h-4" />
@@ -1052,7 +1038,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       {/* 🗂️ ZIP ARCHIVE INSPECTOR MODAL */}
       {inspectZipObj && (
         <div className="modal-backdrop">
-          <div className="glass-panel p-8 w-full max-w-3xl border border-amber-500/40 bg-slate-950 shadow-2xl relative space-y-4">
+          <div className="glass-panel p-8 w-full max-w-3xl border border-amber-500/40 bg-[#080b13] shadow-2xl relative space-y-4">
             <button onClick={() => setInspectZipObj(null)} className="absolute top-5 right-5 text-slate-400 hover:text-white">
               <X className="w-5 h-5" />
             </button>
@@ -1066,12 +1052,12 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
               </div>
             </div>
 
-            <div className="bg-slate-900/90 rounded-2xl border border-white/10 p-4 max-h-[380px] overflow-y-auto space-y-2">
+            <div className="bg-[#05070d] rounded-2xl border border-white/[0.08] p-4 max-h-[380px] overflow-y-auto space-y-2">
               {zipLoading ? (
                 <p className="text-center py-12 text-slate-400">Arşiv içeriği okunuyor...</p>
               ) : zipEntries.length > 0 ? (
                 zipEntries.map((entry, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/60 border border-white/5 hover:border-amber-500/30 text-xs">
+                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-[#090d18] border border-white/[0.04] hover:border-amber-500/30 text-xs">
                     <div className="flex items-center space-x-2.5 min-w-0">
                       <span className="text-amber-400">{entry.isDirectory ? '📁' : '📄'}</span>
                       <span className={`font-mono truncate ${entry.isDirectory ? 'text-amber-300 font-bold' : 'text-slate-200'}`}>
@@ -1087,7 +1073,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                         <a
                           href={`${API_BASE}/api/storage/${inspectZipObj.bucket_name}/zip-extract?key=${encodeURIComponent(inspectZipObj.object_key)}&entry=${encodeURIComponent(entry.name)}`}
                           download
-                          className="btn-accent py-1 px-2.5 text-[11px] bg-amber-600 hover:bg-amber-500 flex items-center gap-1"
+                          className="btn-accent py-1 px-2.5 text-[11px] bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 flex items-center gap-1"
                         >
                           <Download className="w-3 h-3" />
                           <span>Çıkar & İndir</span>
@@ -1111,7 +1097,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       {/* 🚚 MOVE / RENAME OBJECT MODAL */}
       {moveObj && (
         <div className="modal-backdrop">
-          <div className="glass-panel p-8 w-full max-w-lg border border-indigo-500/40 bg-slate-950 shadow-2xl relative space-y-4">
+          <div className="glass-panel p-8 w-full max-w-lg border border-indigo-500/40 bg-[#080b13] shadow-2xl relative space-y-4">
             <button onClick={() => setMoveObj(null)} className="absolute top-5 right-5 text-slate-400 hover:text-white">
               <X className="w-5 h-5" />
             </button>
@@ -1128,7 +1114,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
             <div className="space-y-3 text-xs">
               <div>
                 <label className="text-slate-400 font-bold block mb-1">Mevcut Yol (Source):</label>
-                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 font-mono text-slate-400 truncate">
+                <div className="p-2.5 rounded-xl bg-[#05070d] border border-slate-800 font-mono text-slate-400 truncate">
                   {moveObj.bucket_name} / {moveObj.object_key}
                 </div>
               </div>
@@ -1138,7 +1124,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                 <select
                   value={targetBucketInput}
                   onChange={(e) => setTargetBucketInput(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-bold focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-[#05070d] border border-slate-700 rounded-xl p-2.5 text-white font-bold focus:outline-none focus:border-indigo-500"
                 >
                   {buckets.map(b => (
                     <option key={b.id} value={b.name}>🪣 {b.name}</option>
@@ -1152,7 +1138,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                   type="text"
                   value={targetKeyInput}
                   onChange={(e) => setTargetKeyInput(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-[#05070d] border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-indigo-500"
                   placeholder="örn: backup/2026/yeni-ad.pdf"
                 />
               </div>
@@ -1163,7 +1149,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
               <button 
                 onClick={handleExecuteMove}
                 disabled={moveLoading}
-                className="btn-accent bg-indigo-600 hover:bg-indigo-500"
+                className="btn-accent"
               >
                 {moveLoading ? 'Taşınıyor...' : 'Taşı / Yeniden Adlandır'}
               </button>
@@ -1175,18 +1161,18 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       {/* File Preview Modal */}
       {previewObj && (
         <div className="modal-backdrop">
-          <div className="glass-panel p-8 w-full max-w-2xl border border-slate-700 bg-slate-950 shadow-2xl relative">
+          <div className="glass-panel p-8 w-full max-w-2xl border border-slate-700/80 bg-[#080b13] shadow-2xl relative">
             <button onClick={() => setPreviewObj(null)} className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg">
               <X className="w-5 h-5" />
             </button>
             <div className="flex items-center space-x-3.5 mb-5">
-              <div className="p-3 rounded-xl bg-slate-900 border border-white/10">{getFileIcon(previewObj.content_type, previewObj.object_key, previewObj.bucket_name)}</div>
+              <div className="p-3 rounded-xl bg-[#05070d] border border-white/10">{getFileIcon(previewObj.content_type, previewObj.object_key, previewObj.bucket_name)}</div>
               <div>
                 <h3 className="font-extrabold text-white text-lg font-mono">{previewObj.object_key}</h3>
                 <p className="text-xs text-slate-400">{formatBytes(previewObj.size_bytes)} • {previewObj.content_type}</p>
               </div>
             </div>
-            <div className="bg-slate-900 rounded-2xl p-4 border border-white/10 my-4 max-h-[400px] overflow-auto flex items-center justify-center">
+            <div className="bg-[#05070d] rounded-2xl p-4 border border-white/10 my-4 max-h-[400px] overflow-auto flex items-center justify-center">
               {previewObj.content_type.startsWith('image/') ? (
                 <img src={previewObj.directUrl} alt={previewObj.object_key} className="max-h-80 object-contain rounded-lg" />
               ) : previewObj.content_type.startsWith('video/') ? (
@@ -1209,7 +1195,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       {/* Versions History Modal */}
       {versionsModalObj && (
         <div className="modal-backdrop">
-          <div className="glass-panel p-8 w-full max-w-xl border border-slate-700 bg-slate-950 shadow-2xl relative">
+          <div className="glass-panel p-8 w-full max-w-xl border border-purple-500/40 bg-[#080b13] shadow-2xl relative">
             <button onClick={() => setVersionsModalObj(null)} className="absolute top-5 right-5 text-slate-400 hover:text-white">
               <X className="w-5 h-5" />
             </button>
@@ -1222,13 +1208,13 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
             <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
               {versionsList.length > 0 ? (
                 versionsList.map((ver) => (
-                  <div key={ver.id} className="p-3 rounded-xl bg-slate-900 border border-white/5 flex items-center justify-between text-xs">
+                  <div key={ver.id} className="p-3 rounded-xl bg-[#090d18] border border-white/[0.04] flex items-center justify-between text-xs">
                     <div>
-                      <span className="font-bold text-cyan-400 font-mono">{ver.version_id}</span>
+                      <span className="font-bold text-purple-300 font-mono">{ver.version_id}</span>
                       <span className="text-slate-400 ml-2">{formatBytes(ver.size_bytes)}</span>
                       <p className="text-[11px] text-slate-500 mt-0.5">{new Date(ver.created_at).toLocaleString('tr-TR')}</p>
                     </div>
-                    <span className="font-mono text-[10px] text-slate-400 bg-slate-950 px-2 py-1 rounded">{ver.etag}</span>
+                    <span className="font-mono text-[10px] text-slate-400 bg-[#05070d] px-2 py-1 rounded border border-white/5">{ver.etag}</span>
                   </div>
                 ))
               ) : (

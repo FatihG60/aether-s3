@@ -110,14 +110,14 @@ export default function OverviewTab({ stats, onNavigate }) {
   function renderSortIcon(field) {
     if (sortField !== field) return <ArrowUpDown className="w-3.5 h-3.5 text-slate-600 inline ml-1" />;
     return sortDir === 'asc' 
-      ? <ArrowUp className="w-3.5 h-3.5 text-cyan-400 inline ml-1" />
-      : <ArrowDown className="w-3.5 h-3.5 text-cyan-400 inline ml-1" />;
+      ? <ArrowUp className="w-3.5 h-3.5 text-indigo-400 inline ml-1" />
+      : <ArrowDown className="w-3.5 h-3.5 text-indigo-400 inline ml-1" />;
   }
 
   if (!stats) {
     return (
       <div className="flex flex-col items-center justify-center py-32 space-y-4">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
         <p className="text-sm text-slate-400 font-medium">S3 Depolama İstatistikleri Yükleniyor...</p>
       </div>
     );
@@ -151,21 +151,21 @@ export default function OverviewTab({ stats, onNavigate }) {
     <div className="space-y-8 animate-fadeIn">
       
       {/* Hero Welcome Banner */}
-      <div className="glass-panel p-8 relative overflow-hidden border border-blue-500/20 bg-gradient-to-r from-slate-950 via-slate-900 to-blue-950/40">
-        <div className="absolute -top-24 -right-24 w-96 h-96 bg-blue-500/15 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div className="glass-panel p-8 relative overflow-hidden border border-indigo-500/20 bg-gradient-to-r from-[#0d101b] via-[#111626] to-[#15122b]">
+        <div className="absolute -top-24 -right-24 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none"></div>
+        <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl pointer-events-none"></div>
 
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="space-y-2">
-            <div className="inline-flex items-center space-x-2 bg-blue-500/10 border border-blue-500/20 rounded-full px-3 py-1 text-xs text-blue-300 font-medium">
-              <Zap className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Yüksek Hızlı Yerel Blob Engine</span>
+            <div className="inline-flex items-center space-x-2 bg-indigo-500/10 border border-indigo-500/25 rounded-full px-3.5 py-1 text-xs text-indigo-300 font-medium">
+              <Zap className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Yüksek Hızlı Blob Motoru</span>
             </div>
             <h1 className="text-3xl font-extrabold text-white tracking-tight">
               Özel S3 Storage Kontrol Paneli
             </h1>
             <p className="text-slate-400 text-sm max-w-2xl leading-relaxed">
-              AWS S3 standartlarında nesne depolama, Günlük Kullanıcı Transfer Takibi ve Sayfalamalı/Sıralamalı Arama Konsolu.
+              AWS S3 standartlarında nesne depolama, Günlük Transfer Takibi ve Sayfalamalı/Sıralamalı Arama Konsolu.
             </p>
           </div>
 
@@ -175,36 +175,38 @@ export default function OverviewTab({ stats, onNavigate }) {
               <span>Dosya Yükle</span>
             </button>
             <button onClick={() => onNavigate('buckets')} className="btn-subtle">
-              <PlusCircle className="w-4 h-4 text-blue-400" />
+              <PlusCircle className="w-4 h-4 text-indigo-400" />
               <span>Yeni Bucket</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* 📊 DAILY TRANSFERS ANALYTICS & SEARCH CONSOLE WITH PAGINATION & SORTING */}
-      <div className="glass-panel p-8 space-y-6 border border-cyan-500/30 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/20">
+      {/* 📊 DAILY TRANSFERS ANALYTICS & SEARCH CONSOLE */}
+      <div className="glass-panel p-8 space-y-6 border border-indigo-500/25 bg-gradient-to-br from-[#0c0f18] via-[#101422] to-[#141226]">
         
         {/* Header & Date Badge */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/10">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/[0.08]">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-inner">
               <Radio className="w-5 h-5" />
             </div>
             <div>
               <h2 className="font-extrabold text-xl text-white tracking-tight">
                 Günlük Transfer İstatistikleri & Canlı Arama Konsolu
               </h2>
-              <p className="text-xs text-slate-400">Tarih: <strong className="text-cyan-300 font-mono">{metrics.targetDate}</strong></p>
+              <p className="text-xs text-slate-400">Tarih: <strong className="text-indigo-300 font-mono">{metrics.targetDate}</strong></p>
             </div>
           </div>
 
           {/* Daily Total Transferred Metric Pill */}
-          <div className="bg-gradient-to-r from-blue-900/60 to-cyan-900/60 border border-cyan-400/40 rounded-2xl px-5 py-2.5 text-xs text-white flex items-center space-x-3 shadow-xl">
-            <Gauge className="w-5 h-5 text-cyan-400" />
+          <div className="bg-gradient-to-r from-indigo-900/40 via-purple-900/30 to-[#0e121e] border border-indigo-500/30 rounded-2xl px-5 py-2.5 text-xs text-white flex items-center space-x-3 shadow-lg">
+            <Gauge className="w-5 h-5 text-indigo-400" />
             <div>
-              <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Bugün Toplam Transfer Edilen Veri</span>
-              <span className="text-lg font-extrabold font-mono text-cyan-300">{formatBytes(metrics.todayTotalTransferredBytes)}</span>
+              <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Bugün Toplam Transfer Edilen</span>
+              <span className="text-lg font-extrabold font-mono text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 via-purple-300 to-pink-300">
+                {formatBytes(metrics.todayTotalTransferredBytes)}
+              </span>
             </div>
           </div>
         </div>
@@ -213,37 +215,43 @@ export default function OverviewTab({ stats, onNavigate }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
           {/* Card 1: Completed Today */}
-          <div className="p-4 rounded-xl bg-slate-950/60 border border-emerald-500/30 flex items-center justify-between">
+          <div className="p-4.5 rounded-2xl bg-[#090c14]/70 border border-emerald-500/25 flex items-center justify-between shadow-sm hover:border-emerald-500/40 transition">
             <div>
               <span className="text-xs font-bold text-slate-400 block">Bugün Tamamlanan</span>
               <span className="text-2xl font-extrabold text-emerald-400 font-mono">{metrics.todayCompletedCount} Dosya</span>
               <span className="text-[11px] text-slate-400 block mt-0.5">{formatBytes(metrics.todayCompletedBytes)}</span>
             </div>
-            <CheckCircle2 className="w-8 h-8 text-emerald-400/60" />
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
           </div>
 
           {/* Card 2: Ongoing Transfers */}
-          <div className="p-4 rounded-xl bg-slate-950/60 border border-blue-500/30 flex items-center justify-between">
+          <div className="p-4.5 rounded-2xl bg-[#090c14]/70 border border-indigo-500/25 flex items-center justify-between shadow-sm hover:border-indigo-500/40 transition">
             <div>
               <span className="text-xs font-bold text-slate-400 block">Devam Edenler</span>
-              <span className="text-2xl font-extrabold text-blue-400 font-mono">{metrics.todayOngoingCount} Transfer</span>
+              <span className="text-2xl font-extrabold text-indigo-400 font-mono">{metrics.todayOngoingCount} Transfer</span>
               <span className="text-[11px] text-slate-400 block mt-0.5">{formatBytes(metrics.todayOngoingBytes)}</span>
             </div>
-            <Clock className="w-8 h-8 text-blue-400/60 animate-pulse" />
+            <div className="p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+              <Clock className="w-6 h-6 animate-pulse" />
+            </div>
           </div>
 
           {/* Card 3: Failed Transfers */}
-          <div className="p-4 rounded-xl bg-slate-950/60 border border-rose-500/30 flex items-center justify-between">
+          <div className="p-4.5 rounded-2xl bg-[#090c14]/70 border border-rose-500/25 flex items-center justify-between shadow-sm hover:border-rose-500/40 transition">
             <div>
               <span className="text-xs font-bold text-slate-400 block">Hata Alanlar</span>
               <span className="text-2xl font-extrabold text-rose-400 font-mono">{metrics.todayFailedCount} Hata</span>
               <span className="text-[11px] text-slate-400 block mt-0.5">Kesintiye uğrayanlar</span>
             </div>
-            <AlertCircle className="w-8 h-8 text-rose-400/60" />
+            <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400">
+              <AlertCircle className="w-6 h-6" />
+            </div>
           </div>
 
           {/* Card 4: Total Active Users Today */}
-          <div className="p-4 rounded-xl bg-slate-950/60 border border-purple-500/30 flex items-center justify-between">
+          <div className="p-4.5 rounded-2xl bg-[#090c14]/70 border border-purple-500/25 flex items-center justify-between shadow-sm hover:border-purple-500/40 transition">
             <div>
               <span className="text-xs font-bold text-slate-400 block">Tekil Kullanıcılar</span>
               <span className="text-2xl font-extrabold text-purple-400 font-mono">
@@ -251,7 +259,9 @@ export default function OverviewTab({ stats, onNavigate }) {
               </span>
               <span className="text-[11px] text-slate-400 block mt-0.5">Aktif gönderim yapanlar</span>
             </div>
-            <User className="w-8 h-8 text-purple-400/60" />
+            <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
+              <User className="w-6 h-6" />
+            </div>
           </div>
 
         </div>
@@ -267,7 +277,7 @@ export default function OverviewTab({ stats, onNavigate }) {
               placeholder="Kullanıcı Adı (user_101) veya Dosya Adı ara..."
               value={transferSearch}
               onChange={(e) => setTransferSearch(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-9 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono transition"
+              className="w-full bg-[#080b13] border border-slate-700/80 rounded-xl pl-10 pr-9 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono transition shadow-inner"
             />
             {transferSearch && (
               <button onClick={() => setTransferSearch('')} className="absolute right-3 top-3 text-slate-400 hover:text-white">
@@ -277,7 +287,7 @@ export default function OverviewTab({ stats, onNavigate }) {
           </div>
 
           {/* Status Filter Buttons */}
-          <div className="flex items-center space-x-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800 overflow-x-auto">
+          <div className="flex items-center space-x-1.5 bg-[#080b13] p-1.5 rounded-xl border border-slate-800/80 overflow-x-auto">
             {[
               { id: 'ALL', label: 'Tümü' },
               { id: 'COMPLETED', label: 'Tamamlananlar' },
@@ -289,7 +299,7 @@ export default function OverviewTab({ stats, onNavigate }) {
                 onClick={() => setStatusFilter(tab.id)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
                   statusFilter === tab.id 
-                    ? 'bg-blue-600 text-white shadow-md' 
+                    ? 'bg-indigo-600 text-white shadow-md' 
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -301,10 +311,10 @@ export default function OverviewTab({ stats, onNavigate }) {
         </div>
 
         {/* Transfer Sessions Data Table with Sorting */}
-        <div className="glass-panel overflow-hidden border border-white/5 bg-slate-950/60">
+        <div className="glass-panel overflow-hidden border border-white/[0.06] bg-[#070910]/70">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-bold border-b border-white/10 text-[11px]">
+              <thead className="bg-[#05070c] text-slate-400 uppercase tracking-wider font-bold border-b border-white/[0.08] text-[11px]">
                 <tr>
                   <th onClick={() => handleSort('userId')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
                     Kullanıcı (User ID) {renderSortIcon('userId')}
@@ -326,7 +336,7 @@ export default function OverviewTab({ stats, onNavigate }) {
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
+              <tbody className="divide-y divide-white/[0.04]">
                 {paginatedSessions.length > 0 ? (
                   paginatedSessions.map((s) => {
                     const isDone = s.status === 'COMPLETED';
@@ -342,9 +352,9 @@ export default function OverviewTab({ stats, onNavigate }) {
                       : 0;
 
                     return (
-                      <tr key={s.uploadId} className="hover:bg-slate-900/60 transition duration-150">
+                      <tr key={s.uploadId} className="hover:bg-white/[0.02] transition duration-150">
                         <td className="px-5 py-4 whitespace-nowrap">
-                          <span className="bg-blue-500/10 border border-blue-500/20 text-blue-300 font-mono text-xs font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5">
+                          <span className="bg-indigo-500/10 border border-indigo-500/25 text-indigo-300 font-mono text-xs font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5">
                             <User className="w-3.5 h-3.5" />
                             <span>{s.userId || 'user_default'}</span>
                           </span>
@@ -357,10 +367,10 @@ export default function OverviewTab({ stats, onNavigate }) {
                           <div className="space-y-1 min-w-[120px]">
                             <div className="flex justify-between text-[11px] text-slate-400">
                               <span>Parça {currentCompletedChunks}/{s.totalChunks || 1}</span>
-                              <span className="font-bold text-cyan-400">%{percent}</span>
+                              <span className="font-bold text-indigo-400">%{percent}</span>
                             </div>
-                            <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
-                              <div className={`h-full rounded-full ${isDone ? 'bg-emerald-500' : isFailed ? 'bg-rose-500' : 'bg-cyan-400'}`} style={{ width: `${percent}%` }}></div>
+                            <div className="w-full h-1.5 bg-[#05070d] rounded-full overflow-hidden border border-white/5">
+                              <div className={`h-full rounded-full ${isDone ? 'bg-emerald-500' : isFailed ? 'bg-rose-500' : 'bg-gradient-to-r from-indigo-500 to-purple-500'}`} style={{ width: `${percent}%` }}></div>
                             </div>
                           </div>
                         </td>
@@ -374,7 +384,7 @@ export default function OverviewTab({ stats, onNavigate }) {
                               ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
                               : isFailed
                               ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                              : 'bg-blue-500/10 text-blue-300 border-blue-500/30 animate-pulse'
+                              : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30 animate-pulse'
                           }`}>
                             {isDone ? 'TAMAMLANDI' : isFailed ? 'HATALI' : 'DEVAM EDİYOR'}
                           </span>
@@ -397,40 +407,40 @@ export default function OverviewTab({ stats, onNavigate }) {
           </div>
 
           {/* PAGINATION FOOTER BAR FOR DAILY TRANSFERS */}
-          <div className="p-4 bg-slate-950/80 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-slate-400">
+          <div className="p-4 bg-[#05070c]/80 border-t border-white/[0.06] flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-slate-400">
             <div className="flex items-center space-x-3">
               <span>Sayfa Başına Göster:</span>
               <select
                 value={pageSize}
                 onChange={(e) => setPageSize(Number(e.target.value))}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-white text-xs font-mono focus:outline-none focus:border-cyan-500"
+                className="bg-[#0b0e18] border border-slate-700/80 rounded-lg px-2.5 py-1 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
               >
                 <option value={10}>10</option>
                 <option value={25}>25</option>
                 <option value={50}>50</option>
                 <option value={100}>100</option>
               </select>
-              <span>Toplam <strong className="text-white font-mono">{sortedSessions.length}</strong> kayıttan <strong className="text-white font-mono">{Math.min(sortedSessions.length, (currentPage - 1) * pageSize + 1)}-{Math.min(sortedSessions.length, currentPage * pageSize)}</strong> gösteriliyor</span>
+              <span>Toplam <strong className="text-white font-mono">{sortedSessions.length}</strong> kayıttan <strong className="text-white font-mono">{sortedSessions.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}-{Math.min(sortedSessions.length, currentPage * pageSize)}</strong> gösteriliyor</span>
             </div>
 
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                 disabled={currentPage === 1}
-                className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
+                className="px-3 py-1.5 rounded-lg bg-[#0b0e18] border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
               >
                 <ChevronLeft className="w-4 h-4" />
                 <span>Önceki</span>
               </button>
 
-              <span className="px-3 py-1.5 font-mono text-xs font-bold text-slate-300 bg-slate-900 border border-white/5 rounded-lg">
+              <span className="px-3 py-1.5 font-mono text-xs font-bold text-slate-300 bg-[#0b0e18] border border-white/5 rounded-lg">
                 Sayfa {currentPage} / {totalPages}
               </span>
 
               <button
                 onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                 disabled={currentPage === totalPages}
-                className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
+                className="px-3 py-1.5 rounded-lg bg-[#0b0e18] border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
               >
                 <span>Sonraki</span>
                 <ChevronRight className="w-4 h-4" />
@@ -446,7 +456,7 @@ export default function OverviewTab({ stats, onNavigate }) {
         <div className="glass-panel p-6 relative overflow-hidden group">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Kullanılan Depolama</span>
-            <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 group-hover:scale-110 transition duration-200">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition duration-200">
               <HardDrive className="w-5 h-5" />
             </div>
           </div>
@@ -455,9 +465,9 @@ export default function OverviewTab({ stats, onNavigate }) {
             <div className="mt-3 space-y-1.5">
               <div className="flex justify-between text-xs text-slate-400 font-medium">
                 <span>Kapasite Oranı</span>
-                <span className="font-mono text-cyan-400 font-bold">%{quotaPercent}</span>
+                <span className="font-mono text-indigo-400 font-bold">%{quotaPercent}</span>
               </div>
-              <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden p-0.5 border border-white/5">
+              <div className="w-full h-2 bg-[#05070d] rounded-full overflow-hidden p-0.5 border border-white/5">
                 <div className="h-full progress-glow rounded-full transition-all duration-500" style={{ width: `${quotaPercent}%` }}></div>
               </div>
             </div>
@@ -467,7 +477,7 @@ export default function OverviewTab({ stats, onNavigate }) {
         <div className="glass-panel p-6 relative overflow-hidden group">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Toplam Nesneler</span>
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 group-hover:scale-110 transition duration-200">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 group-hover:scale-110 transition duration-200">
               <Files className="w-5 h-5" />
             </div>
           </div>
@@ -480,7 +490,7 @@ export default function OverviewTab({ stats, onNavigate }) {
         <div className="glass-panel p-6 relative overflow-hidden group">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Aktif Bucket'lar</span>
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 group-hover:scale-110 transition duration-200">
+            <div className="w-10 h-10 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400 group-hover:scale-110 transition duration-200">
               <Database className="w-5 h-5" />
             </div>
           </div>
@@ -507,14 +517,14 @@ export default function OverviewTab({ stats, onNavigate }) {
       {/* Main Grid: Activity Stream & File Category Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 glass-panel p-6 space-y-4">
-          <div className="flex items-center justify-between pb-4 border-b border-white/10">
+          <div className="flex items-center justify-between pb-4 border-b border-white/[0.08]">
             <div className="flex items-center space-x-2.5">
-              <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+              <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
                 <Activity className="w-4 h-4" />
               </div>
               <h2 className="font-bold text-lg text-white">Canlı İşlem Logları (Audit Stream)</h2>
             </div>
-            <span className="text-xs font-mono text-slate-400 bg-slate-900 border border-white/10 px-2.5 py-1 rounded-full">
+            <span className="text-xs font-mono text-slate-400 bg-[#090b14] border border-white/10 px-2.5 py-1 rounded-full">
               Son 20 Kayıt
             </span>
           </div>
@@ -524,15 +534,15 @@ export default function OverviewTab({ stats, onNavigate }) {
               stats.recentActivity.map((log) => (
                 <div 
                   key={log.id} 
-                  className="flex items-center justify-between p-3.5 rounded-xl bg-slate-950/60 border border-white/5 hover:border-blue-500/30 transition duration-150 group"
+                  className="flex items-center justify-between p-3.5 rounded-xl bg-[#070910]/70 border border-white/[0.04] hover:border-indigo-500/30 transition duration-150 group"
                 >
                   <div className="flex items-center space-x-3.5 min-w-0">
-                    <span className="shrink-0 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 font-mono text-[10px] font-bold">
+                    <span className="shrink-0 px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 font-mono text-[10px] font-bold">
                       {log.action}
                     </span>
                     <div className="truncate">
                       <div className="text-sm font-semibold text-slate-200 truncate">
-                        {log.bucket_name ? <span className="text-blue-400">{log.bucket_name}</span> : 'Sistem'}
+                        {log.bucket_name ? <span className="text-indigo-400">{log.bucket_name}</span> : 'Sistem'}
                         {log.object_key && <span className="text-slate-400 font-mono font-normal"> / {log.object_key}</span>}
                       </div>
                       {log.details && <p className="text-xs text-slate-400 truncate mt-0.5">{log.details}</p>}
@@ -553,8 +563,8 @@ export default function OverviewTab({ stats, onNavigate }) {
         </div>
 
         <div className="glass-panel p-6 space-y-4">
-          <div className="flex items-center space-x-2.5 pb-4 border-b border-white/10">
-            <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+          <div className="flex items-center space-x-2.5 pb-4 border-b border-white/[0.08]">
+            <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
               <PieChart className="w-4 h-4" />
             </div>
             <h2 className="font-bold text-lg text-white">Dosya Dağılımı</h2>
@@ -572,12 +582,12 @@ export default function OverviewTab({ stats, onNavigate }) {
                 if (category === 'image') { icon = FileImage; badgeStyle = "text-pink-300 bg-pink-500/10 border-pink-500/20"; }
                 else if (category === 'video') { icon = FileVideo; badgeStyle = "text-purple-300 bg-purple-500/10 border-purple-500/20"; }
                 else if (category === 'audio') { icon = FileAudio; badgeStyle = "text-amber-300 bg-amber-500/10 border-amber-500/20"; }
-                else if (category === 'application' || category === 'text') { icon = FileText; badgeStyle = "text-blue-300 bg-blue-500/10 border-blue-500/20"; }
+                else if (category === 'application' || category === 'text') { icon = FileText; badgeStyle = "text-indigo-300 bg-indigo-500/10 border-indigo-500/20"; }
 
                 const IconComponent = icon;
 
                 return (
-                  <div key={category} className="space-y-2 p-3 rounded-xl bg-slate-950/40 border border-white/5">
+                  <div key={category} className="space-y-2 p-3.5 rounded-xl bg-[#070910]/60 border border-white/[0.04]">
                     <div className="flex items-center justify-between text-xs">
                       <div className="flex items-center space-x-2.5">
                         <div className={`p-1.5 rounded-lg border ${badgeStyle}`}>
@@ -587,8 +597,8 @@ export default function OverviewTab({ stats, onNavigate }) {
                       </div>
                       <span className="font-mono text-slate-300 font-semibold">{formatBytes(bytes)} (%{percent})</span>
                     </div>
-                    <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${percent}%` }}></div>
+                    <div className="w-full h-1.5 bg-[#05070d] rounded-full overflow-hidden border border-white/5">
+                      <div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full" style={{ width: `${percent}%` }}></div>
                     </div>
                   </div>
                 );
