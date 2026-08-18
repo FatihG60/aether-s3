@@ -144,16 +144,7 @@ router.post('/storage/:bucket/upload', upload.single('file'), async (req, res) =
 
 // --- MULTIPART CHUNKED UPLOAD ENDPOINTS ---
 
-function appendChunkFileStream(sourcePath, targetStream) {
-  return new Promise((resolve, reject) => {
-    const readStream = fs.createReadStream(sourcePath);
-    readStream.on('error', reject);
-    readStream.on('end', resolve);
-    readStream.pipe(targetStream, { end: false });
-  });
-}
-
-// 1. Initiate Multipart Upload (Supports Structured Pathing)
+// 1. Initiate Multipart Upload
 router.post('/storage/:bucket/multipart/initiate', async (req, res) => {
   try {
     const { bucket: bucketName } = req.params;
@@ -218,7 +209,7 @@ router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (r
   }
 });
 
-// 3. Complete Multipart Upload
+// 3. ULTRA-FAST Complete Multipart Upload (Direct File Descriptor Append + On-The-Fly ETag Calculation)
 router.post('/storage/:bucket/multipart/complete', async (req, res) => {
   try {
     const { bucket: bucketName } = req.params;
@@ -247,25 +238,31 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
       .filter(f => f.startsWith('chunk_'))
       .sort((a, b) => parseInt(a.split('_')[1], 10) - parseInt(b.split('_')[1], 10));
 
-    const writeStream = fs.createWriteStream(targetFilePath);
+    // Open target file descriptor & initialize MD5 hash in parallel
+    const fileHandle = await fs.promises.open(targetFilePath, 'w');
+    const hash = crypto.createHash('md5');
+    let totalSizeBytes = 0;
 
+    // Fast direct buffer append & MD5 hash update on-the-fly
     for (const chunkFile of files) {
       const chunkPath = path.join(uploadDir, chunkFile);
-      await appendChunkFileStream(chunkPath, writeStream);
-      try { await fs.promises.unlink(chunkPath); } catch (_) {}
+      const chunkBuffer = await fs.promises.readFile(chunkPath);
+      
+      hash.update(chunkBuffer);
+      await fileHandle.write(chunkBuffer, 0, chunkBuffer.length, totalSizeBytes);
+      totalSizeBytes += chunkBuffer.length;
+
+      // Async cleanup chunk file
+      fs.promises.unlink(chunkPath).catch(() => {});
     }
 
-    writeStream.end();
+    await fileHandle.close();
 
-    await new Promise((resolve, reject) => {
-      writeStream.on('finish', resolve);
-      writeStream.on('error', reject);
-    });
-
+    // Cleanup upload folder
     try { await fs.promises.rmdir(uploadDir); } catch (_) {}
 
-    const etag = await calculateMD5(targetFilePath);
-    const stats = await fs.promises.stat(targetFilePath);
+    // ETag is already calculated during merge loop! Zero secondary file read required!
+    const etag = `"${hash.digest('hex')}"`;
     const finalContentType = content_type || mime.lookup(file_name) || 'application/octet-stream';
 
     const existing = await get(
@@ -278,17 +275,17 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
     if (existing) {
       await run(
         `UPDATE objects SET size_bytes = ?, content_type = ?, etag = ?, file_path = ?, version_id = ? WHERE id = ?`,
-        [stats.size, finalContentType, etag, targetFilePath, newVersionId, existing.id]
+        [totalSizeBytes, finalContentType, etag, targetFilePath, newVersionId, existing.id]
       );
     } else {
       await run(
         `INSERT INTO objects (bucket_name, object_key, file_name, file_path, size_bytes, content_type, etag, is_public, user_id, version_id) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [bucketName, normalizedKey, file_name || normalizedKey, targetFilePath, stats.size, finalContentType, etag, bucket.is_public, user_id || 'user_default', newVersionId]
+        [bucketName, normalizedKey, file_name || normalizedKey, targetFilePath, totalSizeBytes, finalContentType, etag, bucket.is_public, user_id || 'user_default', newVersionId]
       );
     }
 
-    await logActivity('MULTIPART_UPLOAD_COMPLETE', bucketName, normalizedKey, `Merged ${files.length} chunks, Size: ${stats.size} bytes`);
+    await logActivity('MULTIPART_UPLOAD_COMPLETE', bucketName, normalizedKey, `Fast-merged ${files.length} chunks, Size: ${totalSizeBytes} bytes`);
 
     const objectMeta = await get(
       `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
@@ -301,11 +298,12 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
       object: objectMeta
     });
   } catch (err) {
+    console.error('Multipart complete error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// POST /api/storage/:bucket/download-zip - Stream Dynamic ZIP of selected objects
+// POST /api/storage/:bucket/download-zip - Stream Dynamic ZIP
 router.post('/storage/:bucket/download-zip', async (req, res) => {
   try {
     const bucketName = req.params.bucket;
