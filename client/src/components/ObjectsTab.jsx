@@ -15,6 +15,7 @@ import {
   Check, 
   X, 
   Folder, 
+  FolderPlus,
   HardDrive,
   Layers,
   Archive,
@@ -29,7 +30,13 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  FolderTree,
+  List,
+  MoveRight,
+  FileArchive,
+  ExternalLink,
+  ChevronRight as ChevronBreadcrumb
 } from 'lucide-react';
 
 const API_BASE = typeof window !== 'undefined' && window.location.port === '3000' 
@@ -38,6 +45,10 @@ const API_BASE = typeof window !== 'undefined' && window.location.port === '3000
 
 export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket, onGeneratePresigned }) {
   const [objects, setObjects] = useState([]);
+  const [commonPrefixes, setCommonPrefixes] = useState([]);
+  const [currentPrefix, setCurrentPrefix] = useState('');
+  const [folderView, setFolderView] = useState(true); // Toggle Folder vs Flat view
+  
   const [trashObjects, setTrashObjects] = useState([]);
   const [viewMode, setViewMode] = useState('active'); // 'active' or 'trash'
   
@@ -49,6 +60,17 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
   const [versionsModalObj, setVersionsModalObj] = useState(null);
   const [versionsList, setVersionsList] = useState([]);
   const [dragActive, setDragActive] = useState(false);
+
+  // ZIP Inspection Modal State
+  const [inspectZipObj, setInspectZipObj] = useState(null);
+  const [zipEntries, setZipEntries] = useState([]);
+  const [zipLoading, setZipLoading] = useState(false);
+
+  // Move / Rename Modal State
+  const [moveObj, setMoveObj] = useState(null);
+  const [targetKeyInput, setTargetKeyInput] = useState('');
+  const [targetBucketInput, setTargetBucketInput] = useState('');
+  const [moveLoading, setMoveLoading] = useState(false);
 
   // Structured Pathing Options
   const [useStructuredPath, setUseStructuredPath] = useState(true);
@@ -70,22 +92,31 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       fetchObjects();
       fetchTrash();
     }
-  }, [selectedBucket, search, viewMode]);
+  }, [selectedBucket, search, viewMode, currentPrefix, folderView]);
 
   // Reset page when search or viewMode changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, viewMode, pageSize, sortField, sortDir]);
+  }, [search, viewMode, pageSize, sortField, sortDir, currentPrefix, folderView]);
 
   async function fetchObjects() {
     if (!selectedBucket) return;
     setLoading(true);
     try {
-      const query = search ? `?search=${encodeURIComponent(search)}` : '';
-      const res = await fetch(`${API_BASE}/api/buckets/${selectedBucket}/objects${query}`);
+      const params = new URLSearchParams();
+      if (search) params.append('search', search);
+      if (folderView && !search) {
+        params.append('delimiter', '/');
+        if (currentPrefix) params.append('prefix', currentPrefix);
+      } else if (currentPrefix && !search) {
+        params.append('prefix', currentPrefix);
+      }
+
+      const res = await fetch(`${API_BASE}/api/buckets/${selectedBucket}/objects?${params.toString()}`);
       const data = await res.json();
       if (data.success) {
         setObjects(data.objects || []);
+        setCommonPrefixes(data.commonPrefixes || []);
       }
     } catch (err) {
       console.error(err);
@@ -159,7 +190,10 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
         formData.append('file', file);
         formData.append('user_id', currentUserId);
         formData.append('structured_path', useStructuredPath ? 'true' : 'false');
-        if (!useStructuredPath) formData.append('key', file.name);
+        if (!useStructuredPath) {
+          const finalKey = currentPrefix ? `${currentPrefix}${file.name}` : file.name;
+          formData.append('key', finalKey);
+        }
 
         setUploadProgress({ 
           fileName: file.name, 
@@ -187,12 +221,13 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
   // Parallel Chunk Uploader (Concurrency pool = 3)
   async function uploadLargeFileParallelChunks(file, chunkSize) {
     const totalChunks = Math.ceil(file.size / chunkSize);
+    const initialKey = currentPrefix ? `${currentPrefix}${file.name}` : file.name;
 
     const initRes = await fetch(`${API_BASE}/api/storage/${selectedBucket}/multipart/initiate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        object_key: file.name,
+        object_key: initialKey,
         file_name: file.name,
         total_chunks: totalChunks,
         file_size: file.size,
@@ -289,6 +324,59 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     const compData = await compRes.json();
     if (!compData.success) {
       alert('Dosya birleştirme hatası: ' + compData.error);
+    }
+  }
+
+  // ZIP Inspection & Extraction
+  async function handleInspectZip(obj) {
+    setInspectZipObj(obj);
+    setZipLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/storage/${obj.bucket_name}/zip-inspect?key=${encodeURIComponent(obj.object_key)}`);
+      const data = await res.json();
+      if (data.success) {
+        setZipEntries(data.entries || []);
+      } else {
+        alert('Arşiv incelenemedi: ' + data.error);
+      }
+    } catch (err) {
+      alert('Hata: ' + err.message);
+    } finally {
+      setZipLoading(false);
+    }
+  }
+
+  // Server-side Move / Rename
+  function handleOpenMoveModal(obj) {
+    setMoveObj(obj);
+    setTargetKeyInput(obj.object_key);
+    setTargetBucketInput(obj.bucket_name);
+  }
+
+  async function handleExecuteMove() {
+    if (!moveObj || !targetKeyInput.trim()) return;
+    setMoveLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/storage/${moveObj.bucket_name}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_key: moveObj.object_key,
+          target_key: targetKeyInput.trim(),
+          new_bucket: targetBucketInput || moveObj.bucket_name
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMoveObj(null);
+        fetchObjects();
+      } else {
+        alert('Taşıma hatası: ' + data.error);
+      }
+    } catch (err) {
+      alert('Hata: ' + err.message);
+    } finally {
+      setMoveLoading(false);
     }
   }
 
@@ -409,13 +497,28 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
 
-  function getFileIcon(contentType) {
+  function getFileIcon(contentType, objectKey, bucketName) {
+    const isImage = contentType && contentType.startsWith('image/');
+    if (isImage && !contentType.includes('svg')) {
+      const thumbUrl = `${API_BASE}/api/storage/${bucketName}/thumbnail/${encodeURIComponent(objectKey)}`;
+      return (
+        <img 
+          src={thumbUrl} 
+          alt="" 
+          className="w-7 h-7 object-cover rounded-lg border border-white/10 shadow-sm"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        />
+      );
+    }
     const type = (contentType || '').split('/')[0];
-    if (type === 'image') return <FileImage className="w-4.5 h-4.5 text-pink-400" />;
-    if (type === 'video') return <FileVideo className="w-4.5 h-4.5 text-purple-400" />;
-    if (type === 'audio') return <FileAudio className="w-4.5 h-4.5 text-amber-400" />;
-    if (type === 'text' || type === 'application') return <FileText className="w-4.5 h-4.5 text-blue-400" />;
-    return <File className="w-4.5 h-4.5 text-slate-400" />;
+    if (objectKey.endsWith('.zip') || objectKey.endsWith('.tar.gz') || objectKey.endsWith('.rar')) {
+      return <FileArchive className="w-5 h-5 text-amber-400" />;
+    }
+    if (type === 'image') return <FileImage className="w-5 h-5 text-pink-400" />;
+    if (type === 'video') return <FileVideo className="w-5 h-5 text-purple-400" />;
+    if (type === 'audio') return <FileAudio className="w-5 h-5 text-amber-400" />;
+    if (type === 'text' || type === 'application') return <FileText className="w-5 h-5 text-blue-400" />;
+    return <File className="w-5 h-5 text-slate-400" />;
   }
 
   function renderSortIcon(field) {
@@ -423,6 +526,18 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     return sortDir === 'asc' 
       ? <ArrowUp className="w-3.5 h-3.5 text-blue-400 inline ml-1" />
       : <ArrowDown className="w-3.5 h-3.5 text-blue-400 inline ml-1" />;
+  }
+
+  // Breadcrumb breakdown
+  const breadcrumbSegments = currentPrefix ? currentPrefix.split('/').filter(Boolean) : [];
+
+  function navigateToBreadcrumb(index) {
+    if (index === -1) {
+      setCurrentPrefix('');
+    } else {
+      const nextPrefix = breadcrumbSegments.slice(0, index + 1).join('/') + '/';
+      setCurrentPrefix(nextPrefix);
+    }
   }
 
   return (
@@ -437,7 +552,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Bucket:</span>
             <select
               value={selectedBucket || ''}
-              onChange={(e) => setSelectedBucket(e.target.value)}
+              onChange={(e) => { setSelectedBucket(e.target.value); setCurrentPrefix(''); }}
               className="bg-slate-950 border border-blue-500/30 rounded-xl px-4 py-2.5 text-sm text-white font-bold focus:outline-none focus:border-blue-500 shadow-inner"
             >
               {buckets.map((b) => (
@@ -470,19 +585,77 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
             </label>
           </div>
 
-          {/* Search */}
-          <div className="relative w-full lg:w-72">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
-            <input 
-              type="text"
-              placeholder="Nesne adı veya ETag ara..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
-            />
+          {/* View Mode Toggle & Search */}
+          <div className="flex items-center space-x-3">
+            <div className="flex bg-slate-950 border border-slate-800 rounded-xl p-1">
+              <button
+                onClick={() => setFolderView(true)}
+                className={`p-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                  folderView ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Klasör Ağacı Görünümü"
+              >
+                <FolderTree className="w-4 h-4" />
+                <span className="hidden sm:inline">Klasörler</span>
+              </button>
+              <button
+                onClick={() => setFolderView(false)}
+                className={`p-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                  !folderView ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Düz Liste Görünümü"
+              >
+                <List className="w-4 h-4" />
+                <span className="hidden sm:inline">Düz Liste</span>
+              </button>
+            </div>
+
+            <div className="relative w-full lg:w-64">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+              <input 
+                type="text"
+                placeholder="Dosya veya ETag ara..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
+              />
+            </div>
           </div>
 
         </div>
+
+        {/* 📂 BREADCRUMB FOLDER NAVIGATION BAR */}
+        {folderView && !search && (
+          <div className="flex items-center space-x-2 pt-2 border-t border-white/5 text-xs text-slate-400 overflow-x-auto pb-1">
+            <span className="text-slate-500 font-bold uppercase tracking-wider text-[10px] shrink-0">Dizin:</span>
+            
+            <button
+              onClick={() => navigateToBreadcrumb(-1)}
+              className={`hover:text-blue-400 font-bold px-2 py-1 rounded-lg bg-slate-900 border transition shrink-0 ${
+                !currentPrefix ? 'text-blue-400 border-blue-500/40' : 'text-slate-300 border-slate-800'
+              }`}
+            >
+              🪣 {selectedBucket}
+            </button>
+
+            {breadcrumbSegments.map((segment, index) => {
+              const isLast = index === breadcrumbSegments.length - 1;
+              return (
+                <React.Fragment key={index}>
+                  <ChevronBreadcrumb className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                  <button
+                    onClick={() => navigateToBreadcrumb(index)}
+                    className={`hover:text-blue-400 font-mono px-2 py-1 rounded-lg bg-slate-900 border transition shrink-0 ${
+                      isLast ? 'text-cyan-300 font-bold border-cyan-500/40 shadow-sm' : 'text-slate-300 border-slate-800'
+                    }`}
+                  >
+                    📁 {segment}
+                  </button>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Drag & Drop Upload Zone */}
@@ -518,7 +691,9 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
         </h3>
         <p className="text-xs text-slate-400 mt-1 font-medium">
           Hedef Yol: <span className="text-cyan-300 font-mono font-bold">
-            {useStructuredPath ? `${currentUserId}/${new Date().toISOString().split('T')[0]}/[GUID]/[DOSYA]` : 'Direkt İsim'}
+            {useStructuredPath 
+              ? `${currentUserId}/${new Date().toISOString().split('T')[0]}/[GUID]/[DOSYA]` 
+              : currentPrefix ? `${currentPrefix}[DOSYA]` : 'Direkt İsim'}
           </span>
         </p>
 
@@ -554,7 +729,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
               }`}
             >
               <HardDrive className="w-4 h-4" />
-              <span>Aktif Dosyalar ({objects.length})</span>
+              <span>Aktif Dosyalar ({objects.length + commonPrefixes.length})</span>
             </button>
 
             <button
@@ -582,7 +757,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
           )}
         </div>
 
-        {/* ACTIVE FILES TABLE */}
+        {/* ACTIVE FILES & FOLDERS TABLE */}
         {viewMode === 'active' && (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
@@ -616,6 +791,44 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
+                {/* Up-level button when inside subfolder */}
+                {folderView && currentPrefix && (
+                  <tr 
+                    onClick={() => {
+                      const parts = currentPrefix.split('/').filter(Boolean);
+                      parts.pop();
+                      setCurrentPrefix(parts.length > 0 ? parts.join('/') + '/' : '');
+                    }}
+                    className="hover:bg-slate-900/80 cursor-pointer bg-slate-950/40 text-blue-400 font-bold"
+                  >
+                    <td className="px-4 py-3 text-center">📁</td>
+                    <td colSpan="6" className="px-4 py-3 font-mono">.. (Üst Klasöre Çık)</td>
+                  </tr>
+                )}
+
+                {/* Subfolder rows */}
+                {folderView && commonPrefixes.map(folder => (
+                  <tr 
+                    key={folder.prefix}
+                    onClick={() => setCurrentPrefix(folder.prefix)}
+                    className="hover:bg-slate-900/60 cursor-pointer transition group bg-slate-950/20"
+                  >
+                    <td className="px-4 py-3.5 text-center text-amber-400">
+                      <Folder className="w-5 h-5 mx-auto fill-amber-400/20 group-hover:scale-110 transition" />
+                    </td>
+                    <td className="px-4 py-3.5 font-bold text-white font-mono flex items-center gap-2">
+                      <span className="text-amber-300">{folder.name}/</span>
+                    </td>
+                    <td className="px-4 py-3.5 text-slate-500 font-mono">Klasör</td>
+                    <td className="px-4 py-3.5 text-slate-600">—</td>
+                    <td className="px-4 py-3.5 text-slate-600">—</td>
+                    <td className="px-4 py-3.5 text-slate-600">—</td>
+                    <td className="px-4 py-3.5 text-right">
+                      <button className="btn-subtle py-1 px-2.5 text-xs text-cyan-400">Klasörü Aç ➔</button>
+                    </td>
+                  </tr>
+                ))}
+
                 {loading ? (
                   <tr>
                     <td colSpan="7" className="text-center py-12 text-slate-500">Yükleniyor...</td>
@@ -624,6 +837,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                   paginatedObjects.map((obj) => {
                     const directUrl = `${API_BASE || window.location.origin}/api/storage/${obj.bucket_name}/${encodeURIComponent(obj.object_key)}`;
                     const isSelected = selectedKeys.includes(obj.object_key);
+                    const isZip = obj.object_key.endsWith('.zip') || obj.object_key.endsWith('.tar.gz');
 
                     return (
                       <tr key={obj.id} className={`hover:bg-slate-900/60 transition ${isSelected ? 'bg-blue-950/20' : ''}`}>
@@ -634,15 +848,15 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                         </td>
                         <td className="px-4 py-4">
                           <div className="flex items-center space-x-3">
-                            <div className="p-2 rounded-xl bg-slate-900 border border-white/5">
-                              {getFileIcon(obj.content_type)}
+                            <div className="p-1 rounded-xl bg-slate-900 border border-white/5 shrink-0 flex items-center justify-center">
+                              {getFileIcon(obj.content_type, obj.object_key, obj.bucket_name)}
                             </div>
                             <div>
                               <span 
                                 onClick={() => setPreviewObj({ ...obj, directUrl })}
                                 className="font-bold text-white hover:text-blue-400 cursor-pointer block text-sm font-mono truncate max-w-xs sm:max-w-md"
                               >
-                                {obj.object_key}
+                                {folderView && currentPrefix ? obj.object_key.slice(currentPrefix.length) : obj.object_key}
                               </span>
                               <span className="text-[11px] text-slate-400 font-sans">{obj.file_name}</span>
                             </div>
@@ -660,10 +874,30 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                           {new Date(obj.created_at).toLocaleString('tr-TR')}
                         </td>
                         <td className="px-4 py-4 text-right space-x-1.5 whitespace-nowrap">
+                          {/* ZIP Inspect button */}
+                          {isZip && (
+                            <button 
+                              onClick={() => handleInspectZip(obj)}
+                              className="btn-subtle p-2 text-xs text-amber-400 hover:text-amber-300"
+                              title="Arşiv İçi İncele & Çıkar"
+                            >
+                              <FileArchive className="w-4 h-4" />
+                            </button>
+                          )}
+
+                          {/* Move / Rename */}
+                          <button 
+                            onClick={() => handleOpenMoveModal(obj)}
+                            className="btn-subtle p-2 text-xs text-indigo-400 hover:text-indigo-300"
+                            title="Taşı / Yeniden Adlandır"
+                          >
+                            <MoveRight className="w-4 h-4" />
+                          </button>
+
                           {/* Versions */}
                           <button 
                             onClick={() => { setVersionsModalObj(obj); fetchVersions(obj.object_key); }}
-                            className="btn-subtle p-2 text-xs text-amber-400 hover:text-amber-300"
+                            className="btn-subtle p-2 text-xs text-purple-400 hover:text-purple-300"
                             title="Sürüm Geçmişi"
                           >
                             <History className="w-4 h-4" />
@@ -708,11 +942,11 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                       </tr>
                     );
                   })
-                ) : (
+                ) : commonPrefixes.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="text-center py-16 text-slate-500">Kayıtlı dosya yok.</td>
+                    <td colSpan="7" className="text-center py-16 text-slate-500">Kayıtlı dosya veya klasör yok.</td>
                   </tr>
-                )}
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -785,7 +1019,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
               <option value={50}>50</option>
               <option value={100}>100</option>
             </select>
-            <span>Toplam <strong className="text-white font-mono">{sortedObjects.length}</strong> kayıttan <strong className="text-white font-mono">{Math.min(sortedObjects.length, (currentPage - 1) * pageSize + 1)}-{Math.min(sortedObjects.length, currentPage * pageSize)}</strong> gösteriliyor</span>
+            <span>Toplam <strong className="text-white font-mono">{sortedObjects.length}</strong> dosyadan <strong className="text-white font-mono">{sortedObjects.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}-{Math.min(sortedObjects.length, currentPage * pageSize)}</strong> gösteriliyor</span>
           </div>
 
           <div className="flex items-center space-x-2">
@@ -815,6 +1049,129 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
 
       </div>
 
+      {/* 🗂️ ZIP ARCHIVE INSPECTOR MODAL */}
+      {inspectZipObj && (
+        <div className="modal-backdrop">
+          <div className="glass-panel p-8 w-full max-w-3xl border border-amber-500/40 bg-slate-950 shadow-2xl relative space-y-4">
+            <button onClick={() => setInspectZipObj(null)} className="absolute top-5 right-5 text-slate-400 hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
+            <div className="flex items-center space-x-3">
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                <FileArchive className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-white text-lg font-mono">Arşiv İçi Dosya Gezgini</h3>
+                <p className="text-xs text-slate-400 font-mono">{inspectZipObj.object_key}</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/90 rounded-2xl border border-white/10 p-4 max-h-[380px] overflow-y-auto space-y-2">
+              {zipLoading ? (
+                <p className="text-center py-12 text-slate-400">Arşiv içeriği okunuyor...</p>
+              ) : zipEntries.length > 0 ? (
+                zipEntries.map((entry, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/60 border border-white/5 hover:border-amber-500/30 text-xs">
+                    <div className="flex items-center space-x-2.5 min-w-0">
+                      <span className="text-amber-400">{entry.isDirectory ? '📁' : '📄'}</span>
+                      <span className={`font-mono truncate ${entry.isDirectory ? 'text-amber-300 font-bold' : 'text-slate-200'}`}>
+                        {entry.name}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center space-x-3 shrink-0">
+                      {!entry.isDirectory && (
+                        <span className="font-mono text-slate-400 text-[11px]">{formatBytes(entry.size)}</span>
+                      )}
+                      {!entry.isDirectory && (
+                        <a
+                          href={`${API_BASE}/api/storage/${inspectZipObj.bucket_name}/zip-extract?key=${encodeURIComponent(inspectZipObj.object_key)}&entry=${encodeURIComponent(entry.name)}`}
+                          download
+                          className="btn-accent py-1 px-2.5 text-[11px] bg-amber-600 hover:bg-amber-500 flex items-center gap-1"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>Çıkar & İndir</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-center py-12 text-slate-500">Arşiv içi boş veya okunamadı.</p>
+              )}
+            </div>
+
+            <div className="flex justify-end">
+              <button onClick={() => setInspectZipObj(null)} className="btn-subtle">Kapat</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🚚 MOVE / RENAME OBJECT MODAL */}
+      {moveObj && (
+        <div className="modal-backdrop">
+          <div className="glass-panel p-8 w-full max-w-lg border border-indigo-500/40 bg-slate-950 shadow-2xl relative space-y-4">
+            <button onClick={() => setMoveObj(null)} className="absolute top-5 right-5 text-slate-400 hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
+            <div className="flex items-center space-x-3">
+              <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
+                <MoveRight className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-white text-lg">Sunucu Taraflı Taşı / Yeniden Adlandır</h3>
+                <p className="text-xs text-slate-400">Ağ üzerinden tekrar yüklemeden sıfır gecikmeyle taşır.</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-slate-400 font-bold block mb-1">Mevcut Yol (Source):</label>
+                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 font-mono text-slate-400 truncate">
+                  {moveObj.bucket_name} / {moveObj.object_key}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-400 font-bold block mb-1">Hedef Bucket:</label>
+                <select
+                  value={targetBucketInput}
+                  onChange={(e) => setTargetBucketInput(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-bold focus:outline-none focus:border-indigo-500"
+                >
+                  {buckets.map(b => (
+                    <option key={b.id} value={b.name}>🪣 {b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-slate-400 font-bold block mb-1">Yeni Dosya Yolu / Key (Target):</label>
+                <input
+                  type="text"
+                  value={targetKeyInput}
+                  onChange={(e) => setTargetKeyInput(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-indigo-500"
+                  placeholder="örn: backup/2026/yeni-ad.pdf"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-2">
+              <button onClick={() => setMoveObj(null)} className="btn-subtle">İptal</button>
+              <button 
+                onClick={handleExecuteMove}
+                disabled={moveLoading}
+                className="btn-accent bg-indigo-600 hover:bg-indigo-500"
+              >
+                {moveLoading ? 'Taşınıyor...' : 'Taşı / Yeniden Adlandır'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* File Preview Modal */}
       {previewObj && (
         <div className="modal-backdrop">
@@ -823,7 +1180,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
               <X className="w-5 h-5" />
             </button>
             <div className="flex items-center space-x-3.5 mb-5">
-              <div className="p-3 rounded-xl bg-slate-900 border border-white/10">{getFileIcon(previewObj.content_type)}</div>
+              <div className="p-3 rounded-xl bg-slate-900 border border-white/10">{getFileIcon(previewObj.content_type, previewObj.object_key, previewObj.bucket_name)}</div>
               <div>
                 <h3 className="font-extrabold text-white text-lg font-mono">{previewObj.object_key}</h3>
                 <p className="text-xs text-slate-400">{formatBytes(previewObj.size_bytes)} • {previewObj.content_type}</p>
@@ -857,7 +1214,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
               <X className="w-5 h-5" />
             </button>
             <h3 className="font-bold text-white text-lg mb-1 flex items-center gap-2">
-              <History className="w-5 h-5 text-amber-400" />
+              <History className="w-5 h-5 text-purple-400" />
               <span>Sürüm Geçmişi</span>
             </h3>
             <p className="text-xs text-slate-400 mb-4 font-mono">{versionsModalObj.object_key}</p>

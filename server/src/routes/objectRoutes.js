@@ -5,6 +5,8 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import archiver from 'archiver';
+import AdmZip from 'adm-zip';
+import Jimp from 'jimp';
 import { v4 as uuidv4 } from 'uuid';
 import { query, get, run, logActivity } from '../db/database.js';
 import { saveObjectFile, deleteObjectFile, streamPartialFile, calculateMD5, getBucketDir } from '../services/storageEngine.js';
@@ -15,6 +17,11 @@ const upload = multer({ dest: path.join(process.cwd(), 'data/temp') });
 const CHUNKS_DIR = path.join(process.cwd(), 'data/temp_chunks');
 if (!fs.existsSync(CHUNKS_DIR)) {
   fs.mkdirSync(CHUNKS_DIR, { recursive: true });
+}
+
+const THUMBNAIL_DIR = path.join(process.cwd(), 'data/thumbnails');
+if (!fs.existsSync(THUMBNAIL_DIR)) {
+  fs.mkdirSync(THUMBNAIL_DIR, { recursive: true });
 }
 
 // In-Memory Live Upload Telemetry Registry
@@ -39,11 +46,11 @@ function generateStructuredObjectKey(userId, originalFileName) {
   return `${user}/${today}/${guid}/${safeFileName}`;
 }
 
-// GET /api/buckets/:bucket/objects - List objects
+// GET /api/buckets/:bucket/objects - List objects (with Folder Hierarchy / Delimiter support)
 router.get('/buckets/:bucket/objects', async (req, res) => {
   try {
     const bucketName = req.params.bucket;
-    const { search, prefix } = req.query;
+    const { search, prefix = '', delimiter } = req.query;
 
     const bucket = await get(`SELECT * FROM buckets WHERE name = ?`, [bucketName]);
     if (!bucket) {
@@ -56,17 +63,51 @@ router.get('/buckets/:bucket/objects', async (req, res) => {
     if (search) {
       sql += ` AND (file_name LIKE ? OR object_key LIKE ?)`;
       params.push(`%${search}%`, `%${search}%`);
-    }
-
-    if (prefix) {
+    } else if (prefix) {
       sql += ` AND object_key LIKE ?`;
       params.push(`${prefix}%`);
     }
 
     sql += ` ORDER BY created_at DESC`;
 
-    const objects = await query(sql, params);
-    res.json({ success: true, objects });
+    const allObjects = await query(sql, params);
+
+    // If delimiter is specified (e.g. '/'), compute CommonPrefixes (Folders) and direct Objects
+    if (delimiter === '/' && !search) {
+      const commonPrefixesSet = new Set();
+      const directObjects = [];
+
+      allObjects.forEach(obj => {
+        const key = obj.object_key;
+        // Strip the query prefix from start
+        const relativeKey = prefix ? key.slice(prefix.length) : key;
+        const slashIndex = relativeKey.indexOf('/');
+
+        if (slashIndex !== -1) {
+          // This is inside a subfolder
+          const folderName = relativeKey.slice(0, slashIndex + 1);
+          commonPrefixesSet.add(prefix + folderName);
+        } else {
+          // Direct file in current folder
+          directObjects.push(obj);
+        }
+      });
+
+      const commonPrefixes = Array.from(commonPrefixesSet).sort().map(p => ({
+        prefix: p,
+        name: p.slice(prefix.length).replace(/\/$/, '')
+      }));
+
+      return res.json({
+        success: true,
+        objects: directObjects,
+        commonPrefixes,
+        currentPrefix: prefix,
+        totalCount: allObjects.length
+      });
+    }
+
+    res.json({ success: true, objects: allObjects, totalCount: allObjects.length });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -284,7 +325,7 @@ router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (r
   }
 });
 
-// 3. Complete Multipart Upload & Mark Telemetry + DB Complete
+// 3. Complete Multipart Upload
 router.post('/storage/:bucket/multipart/complete', async (req, res) => {
   try {
     const { bucket: bucketName } = req.params;
@@ -383,6 +424,204 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
     });
   } catch (err) {
     console.error('Multipart complete error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- ZIP / ARCHIVE INSPECTION & EXTRACTION ENDPOINTS ---
+
+// GET /api/storage/:bucket/zip-inspect - Inspect file tree inside a .zip file
+router.get('/storage/:bucket/zip-inspect', async (req, res) => {
+  try {
+    const bucketName = req.params.bucket;
+    const { key } = req.query;
+
+    if (!key) {
+      return res.status(400).json({ success: false, error: 'Object key is required' });
+    }
+
+    const object = await get(
+      `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
+      [bucketName, key]
+    );
+
+    if (!object || !fs.existsSync(object.file_path)) {
+      return res.status(404).json({ success: false, error: 'ZIP file not found' });
+    }
+
+    const zip = new AdmZip(object.file_path);
+    const zipEntries = zip.getEntries();
+
+    const entries = zipEntries.map(entry => ({
+      name: entry.entryName,
+      size: entry.header.size,
+      compressedSize: entry.header.compressedSize,
+      isDirectory: entry.isDirectory,
+      time: entry.header.time
+    }));
+
+    res.json({
+      success: true,
+      zipFile: object.object_key,
+      totalEntries: entries.length,
+      entries
+    });
+  } catch (err) {
+    console.error('ZIP Inspect error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to inspect ZIP file' });
+  }
+});
+
+// GET /api/storage/:bucket/zip-extract - Extract & download a single file from inside a .zip archive
+router.get('/storage/:bucket/zip-extract', async (req, res) => {
+  try {
+    const bucketName = req.params.bucket;
+    const { key, entry: entryName } = req.query;
+
+    if (!key || !entryName) {
+      return res.status(400).json({ success: false, error: 'Object key and entry name are required' });
+    }
+
+    const object = await get(
+      `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
+      [bucketName, key]
+    );
+
+    if (!object || !fs.existsSync(object.file_path)) {
+      return res.status(404).json({ success: false, error: 'ZIP file not found' });
+    }
+
+    const zip = new AdmZip(object.file_path);
+    const zipEntry = zip.getEntry(entryName);
+
+    if (!zipEntry || zipEntry.isDirectory) {
+      return res.status(404).json({ success: false, error: 'Entry not found or is a directory' });
+    }
+
+    const fileBuffer = zip.readFile(zipEntry);
+    const baseFileName = path.basename(entryName);
+    const mimeType = mime.lookup(baseFileName) || 'application/octet-stream';
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(baseFileName)}"`);
+    res.setHeader('Content-Length', fileBuffer.length);
+    res.send(fileBuffer);
+  } catch (err) {
+    console.error('ZIP Extract error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Failed to extract from ZIP' });
+  }
+});
+
+// --- SERVER-SIDE FAST MOVE / RENAME OBJECT (COPY OBJECT) ---
+
+// POST /api/storage/:bucket/move - Move or Rename object on server with zero network re-upload
+router.post('/storage/:bucket/move', async (req, res) => {
+  try {
+    const currentBucket = req.params.bucket;
+    const { source_key, target_key, new_bucket } = req.body;
+
+    if (!source_key || !target_key) {
+      return res.status(400).json({ success: false, error: 'source_key and target_key are required' });
+    }
+
+    const destBucket = new_bucket || currentBucket;
+
+    // Check source object
+    const sourceObj = await get(
+      `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
+      [currentBucket, source_key]
+    );
+
+    if (!sourceObj || !fs.existsSync(sourceObj.file_path)) {
+      return res.status(404).json({ success: false, error: 'Source object not found' });
+    }
+
+    // Prepare destination file path
+    const destBucketDir = getBucketDir(destBucket);
+    const normalizedDestKey = target_key.replace(/\\/g, '/').replace(/^\/+/, '');
+    const newFilePath = path.join(destBucketDir, normalizedDestKey);
+
+    const newFileDir = path.dirname(newFilePath);
+    if (!fs.existsSync(newFileDir)) {
+      await fs.promises.mkdir(newFileDir, { recursive: true });
+    }
+
+    // Move physical file on disk (fast zero-byte network overhead)
+    await fs.promises.copyFile(sourceObj.file_path, newFilePath);
+    try { await fs.promises.unlink(sourceObj.file_path); } catch (_) {}
+
+    const newFileName = path.basename(normalizedDestKey);
+    const newContentType = mime.lookup(newFileName) || sourceObj.content_type;
+
+    // Update database record
+    await run(
+      `UPDATE objects SET bucket_name = ?, object_key = ?, file_name = ?, file_path = ?, content_type = ? WHERE id = ?`,
+      [destBucket, normalizedDestKey, newFileName, newFilePath, newContentType, sourceObj.id]
+    );
+
+    await logActivity('MOVE_OBJECT', currentBucket, source_key, `Moved to ${destBucket}/${normalizedDestKey}`);
+
+    const updatedObj = await get(`SELECT * FROM objects WHERE id = ?`, [sourceObj.id]);
+
+    res.json({
+      success: true,
+      message: 'Object moved/renamed successfully',
+      object: updatedObj
+    });
+  } catch (err) {
+    console.error('Move object error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- AUTOMATIC MEDIA THUMBNAIL ENGINE ---
+
+// GET /api/storage/:bucket/thumbnail/* - Generate & serve lightweight cached image thumbnail
+router.get('/storage/:bucket/thumbnail/*', async (req, res) => {
+  try {
+    const bucketName = req.params.bucket;
+    const objectKey = decodeURIComponent(req.params[0]);
+
+    const object = await get(
+      `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
+      [bucketName, objectKey]
+    );
+
+    if (!object || !fs.existsSync(object.file_path)) {
+      return res.status(404).json({ success: false, error: 'Object not found' });
+    }
+
+    const isImage = object.content_type && object.content_type.startsWith('image/');
+    if (!isImage || object.content_type.includes('svg')) {
+      // For non-images or SVG, serve original directly
+      return streamPartialFile(req, res, object.file_path, object.content_type);
+    }
+
+    const thumbHash = crypto.createHash('md5').update(`${bucketName}_${objectKey}_${object.etag}`).digest('hex');
+    const thumbPath = path.join(THUMBNAIL_DIR, `${thumbHash}.jpg`);
+
+    if (fs.existsSync(thumbPath)) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return fs.createReadStream(thumbPath).pipe(res);
+    }
+
+    // Generate 160x160 thumbnail with Jimp
+    try {
+      const image = await Jimp.read(object.file_path);
+      await image
+        .cover(160, 160)
+        .quality(80)
+        .writeAsync(thumbPath);
+
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      fs.createReadStream(thumbPath).pipe(res);
+    } catch (jimpErr) {
+      // Fallback to original file if thumbnail generation fails
+      streamPartialFile(req, res, object.file_path, object.content_type);
+    }
+  } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
