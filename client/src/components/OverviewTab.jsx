@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   HardDrive, 
   Database, 
@@ -7,18 +7,58 @@ import {
   PieChart, 
   PlusCircle, 
   Upload, 
-  Link2,
   FileImage,
   FileVideo,
   FileAudio,
   FileText,
   File,
-  ShieldCheck,
   Zap,
-  ArrowUpRight
+  Radio,
+  User,
+  Layers,
+  Sparkles,
+  Gauge
 } from 'lucide-react';
 
+const API_BASE = typeof window !== 'undefined' && window.location.port === '3000' 
+  ? 'http://localhost:5000' 
+  : '';
+
 export default function OverviewTab({ stats, onNavigate }) {
+  const [telemetry, setTelemetry] = useState({
+    activeCount: 0,
+    activeUsersCount: 0,
+    totalSpeedMBps: 0,
+    sessions: []
+  });
+
+  // Auto-poll live user upload telemetry every 1 second
+  useEffect(() => {
+    fetchLiveTelemetry();
+    const interval = setInterval(fetchLiveTelemetry, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function fetchLiveTelemetry() {
+    try {
+      const res = await fetch(`${API_BASE}/api/stats/live-uploads`);
+      const data = await res.json();
+      if (data.success && data.telemetry) {
+        setTelemetry(data.telemetry);
+      }
+    } catch (err) {
+      console.error('Failed to fetch live telemetry:', err);
+    }
+  }
+
+  function formatBytes(bytes, decimals = 1) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i];
+  }
+
   if (!stats) {
     return (
       <div className="flex flex-col items-center justify-center py-32 space-y-4">
@@ -26,15 +66,6 @@ export default function OverviewTab({ stats, onNavigate }) {
         <p className="text-sm text-slate-400 font-medium">S3 Depolama İstatistikleri Yükleniyor...</p>
       </div>
     );
-  }
-
-  function formatBytes(bytes, decimals = 2) {
-    if (!bytes || bytes === 0) return '0 B';
-    const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
 
   const quotaPercent = stats.totalQuotaBytes > 0 
@@ -59,7 +90,7 @@ export default function OverviewTab({ stats, onNavigate }) {
               Özel S3 Storage Kontrol Paneli
             </h1>
             <p className="text-slate-400 text-sm max-w-2xl leading-relaxed">
-              AWS S3 standartlarında nesne depolama, ETag doğrulaması, HTTP Range medya akışı ve HMAC imzalı bağlantı servisi.
+              AWS S3 standartlarında nesne depolama, ETag doğrulaması, Canlı Yükleme İzleme ve HMAC imzalı bağlantı servisi.
             </p>
           </div>
 
@@ -76,10 +107,118 @@ export default function OverviewTab({ stats, onNavigate }) {
         </div>
       </div>
 
+      {/* 📡 REAL-TIME LIVE UPLOADS MONITOR DASHBOARD WIDGET */}
+      <div className="glass-panel p-6 border border-cyan-500/30 space-y-4 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/20">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
+          
+          <div className="flex items-center space-x-3">
+            <div className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+            </div>
+            <div>
+              <h2 className="font-extrabold text-lg text-white flex items-center gap-2">
+                <Radio className="w-5 h-5 text-cyan-400" />
+                <span>Canlı Kullanıcı Yüklemeleri (Real-Time Live Stream Monitor)</span>
+              </h2>
+              <p className="text-xs text-slate-400">Anlık bağlanan kullanıcılar ve devam eden dosya yüklemeleri.</p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3 text-xs font-bold">
+            <span className="bg-slate-900 border border-slate-700 text-slate-300 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+              <User className="w-3.5 h-3.5 text-blue-400" />
+              <span>Aktif Kullanıcılar: <strong className="text-white font-mono">{telemetry.activeUsersCount}</strong></span>
+            </span>
+
+            <span className="bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-lg">
+              <Gauge className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Anlık Hız: <strong className="text-white font-mono">{telemetry.totalSpeedMBps} MB/s</strong></span>
+            </span>
+          </div>
+
+        </div>
+
+        {/* Live Upload Sessions List */}
+        <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+          {telemetry.sessions && telemetry.sessions.length > 0 ? (
+            telemetry.sessions.map((session) => {
+              const percent = session.totalChunks > 0 
+                ? Math.min(100, Math.round((session.completedChunks / session.totalChunks) * 100))
+                : 0;
+
+              const isCompleted = session.status === 'TAMAMLANDI';
+              const speedMB = (session.speedBytesPerSec / (1024 * 1024)).toFixed(1);
+
+              return (
+                <div 
+                  key={session.uploadId}
+                  className={`p-4 rounded-xl border transition-all duration-200 ${
+                    isCompleted 
+                      ? 'bg-slate-950/60 border-emerald-500/30' 
+                      : 'bg-slate-900/80 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center space-x-3 min-w-0">
+                      <span className="bg-blue-500/10 border border-blue-500/20 text-blue-300 font-mono text-xs font-bold px-2.5 py-0.5 rounded-md shrink-0 flex items-center gap-1">
+                        <User className="w-3 h-3" />
+                        <span>{session.userId}</span>
+                      </span>
+
+                      <div className="truncate">
+                        <span className="font-bold text-white text-sm font-mono truncate block">{session.fileName}</span>
+                        <span className="text-[11px] text-slate-400">Bucket: <strong className="text-slate-300">{session.bucketName}</strong></span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-3 text-xs shrink-0">
+                      {!isCompleted && (
+                        <span className="font-mono text-cyan-400 font-bold bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded">
+                          ⚡ {speedMB} MB/s
+                        </span>
+                      )}
+
+                      <span className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] ${
+                        isCompleted 
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
+                          : 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 animate-pulse'
+                      }`}>
+                        {session.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="space-y-1 mt-3">
+                    <div className="flex justify-between text-[11px] font-mono text-slate-400">
+                      <span>Parça: {session.completedChunks} / {session.totalChunks}</span>
+                      <span>{formatBytes(session.uploadedBytes)} / {formatBytes(session.fileSize)} (%{percent})</span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-white/5">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          isCompleted ? 'bg-emerald-500' : 'bg-gradient-to-r from-blue-500 to-cyan-400'
+                        }`} 
+                        style={{ width: `${percent}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="text-center py-10 text-slate-500 space-y-1">
+              <Radio className="w-8 h-8 mx-auto text-slate-700" />
+              <p className="text-sm font-medium">Şu an aktif canlı yükleme yapan kullanıcı bulunmuyor.</p>
+              <p className="text-xs text-slate-400">Bir dosya yüklemesi başladığında anlık olarak bu ekrana yansıyacaktır.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* 4 Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        
-        {/* Card 1: Used Storage */}
         <div className="glass-panel p-6 relative overflow-hidden group">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Kullanılan Depolama</span>
@@ -101,7 +240,6 @@ export default function OverviewTab({ stats, onNavigate }) {
           </div>
         </div>
 
-        {/* Card 2: Total Objects */}
         <div className="glass-panel p-6 relative overflow-hidden group">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Toplam Nesneler</span>
@@ -115,7 +253,6 @@ export default function OverviewTab({ stats, onNavigate }) {
           </div>
         </div>
 
-        {/* Card 3: Total Buckets */}
         <div className="glass-panel p-6 relative overflow-hidden group">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Aktif Bucket'lar</span>
@@ -129,7 +266,6 @@ export default function OverviewTab({ stats, onNavigate }) {
           </div>
         </div>
 
-        {/* Card 4: Total Storage Quota */}
         <div className="glass-panel p-6 relative overflow-hidden group">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tahsis Edilen Kota</span>
@@ -142,13 +278,10 @@ export default function OverviewTab({ stats, onNavigate }) {
             <p className="text-xs text-slate-400 mt-2 font-medium">Toplam atanmış disk limiti</p>
           </div>
         </div>
-
       </div>
 
       {/* Main Grid: Activity Stream & File Category Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Activity Stream (2 cols) */}
         <div className="lg:col-span-2 glass-panel p-6 space-y-4">
           <div className="flex items-center justify-between pb-4 border-b border-white/10">
             <div className="flex items-center space-x-2.5">
@@ -195,7 +328,6 @@ export default function OverviewTab({ stats, onNavigate }) {
           </div>
         </div>
 
-        {/* Content Type Breakdown (1 col) */}
         <div className="glass-panel p-6 space-y-4">
           <div className="flex items-center space-x-2.5 pb-4 border-b border-white/10">
             <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
@@ -245,7 +377,6 @@ export default function OverviewTab({ stats, onNavigate }) {
             )}
           </div>
         </div>
-
       </div>
 
     </div>

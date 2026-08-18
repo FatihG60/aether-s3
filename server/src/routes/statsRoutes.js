@@ -1,6 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { query, get, run, logActivity } from '../db/database.js';
+import { liveUploadSessions } from './objectRoutes.js';
 
 const router = express.Router();
 
@@ -16,7 +17,6 @@ router.get('/stats', async (req, res) => {
     const totalBytesUsed = objects.reduce((acc, curr) => acc + (curr.size_bytes || 0), 0);
     const totalQuotaBytes = buckets.reduce((acc, curr) => acc + (curr.quota_bytes || 0), 0);
 
-    // Group objects by Content-Type category
     const mimeCategories = {};
     objects.forEach(obj => {
       const type = (obj.content_type || 'unknown').split('/')[0];
@@ -32,6 +32,29 @@ router.get('/stats', async (req, res) => {
         totalQuotaBytes,
         mimeCategories,
         recentActivity: logs.slice(0, 20)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/stats/live-uploads - Real-Time Live User Upload Monitor Telemetry
+router.get('/stats/live-uploads', (req, res) => {
+  try {
+    const sessions = Array.from(liveUploadSessions.values());
+    const activeSessions = sessions.filter(s => s.status === 'YÜKLENİYOR');
+    
+    const totalSpeedBytesPerSec = activeSessions.reduce((acc, curr) => acc + (curr.speedBytesPerSec || 0), 0);
+    const activeUsers = [...new Set(activeSessions.map(s => s.userId))];
+
+    res.json({
+      success: true,
+      telemetry: {
+        activeCount: activeSessions.length,
+        activeUsersCount: activeUsers.length,
+        totalSpeedMBps: parseFloat((totalSpeedBytesPerSec / (1024 * 1024)).toFixed(2)),
+        sessions: sessions.sort((a, b) => b.lastUpdated - a.lastUpdated).slice(0, 50)
       }
     });
   } catch (err) {

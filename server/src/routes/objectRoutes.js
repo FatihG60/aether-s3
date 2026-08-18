@@ -17,6 +17,19 @@ if (!fs.existsSync(CHUNKS_DIR)) {
   fs.mkdirSync(CHUNKS_DIR, { recursive: true });
 }
 
+// In-Memory Live Upload Telemetry Registry
+export const liveUploadSessions = new Map();
+
+// Cleanup inactive sessions older than 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, session] of liveUploadSessions.entries()) {
+    if (now - session.lastUpdated > 10 * 60 * 1000) {
+      liveUploadSessions.delete(id);
+    }
+  }
+}, 30000);
+
 // Helper: Structured Path Generator {user}/{YYYY-MM-DD}/{guid}/{file_name}
 function generateStructuredObjectKey(userId, originalFileName) {
   const user = userId && userId.trim() ? userId.trim() : 'user_default';
@@ -142,7 +155,7 @@ router.post('/storage/:bucket/upload', upload.single('file'), async (req, res) =
   }
 });
 
-// --- MULTIPART CHUNKED UPLOAD ENDPOINTS ---
+// --- MULTIPART CHUNKED UPLOAD ENDPOINTS & LIVE TELEMETRY ---
 
 // 1. Initiate Multipart Upload
 router.post('/storage/:bucket/multipart/initiate', async (req, res) => {
@@ -164,6 +177,23 @@ router.post('/storage/:bucket/multipart/initiate', async (req, res) => {
     const uploadDir = path.join(CHUNKS_DIR, uploadId);
     await fs.promises.mkdir(uploadDir, { recursive: true });
 
+    // Register live session in telemetry state
+    liveUploadSessions.set(uploadId, {
+      uploadId,
+      userId: user_id || 'user_default',
+      bucketName,
+      objectKey: finalKey,
+      fileName: file_name || finalKey,
+      totalChunks: parseInt(total_chunks, 10) || 1,
+      completedChunks: 0,
+      fileSize: parseInt(file_size, 10) || 0,
+      uploadedBytes: 0,
+      speedBytesPerSec: 0,
+      status: 'YÜKLENİYOR',
+      startTime: Date.now(),
+      lastUpdated: Date.now()
+    });
+
     res.json({
       success: true,
       uploadId,
@@ -175,7 +205,7 @@ router.post('/storage/:bucket/multipart/initiate', async (req, res) => {
   }
 });
 
-// 2. Upload Chunk
+// 2. Upload Chunk & Update Telemetry
 router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (req, res) => {
   try {
     const { uploadId, chunkIndex } = req.body;
@@ -196,6 +226,19 @@ router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (r
     await fs.promises.copyFile(file.path, chunkTarget);
     try { await fs.promises.unlink(file.path); } catch (_) {}
 
+    // Telemetry Update
+    const session = liveUploadSessions.get(uploadId);
+    if (session) {
+      session.completedChunks += 1;
+      session.uploadedBytes += file.size;
+      const now = Date.now();
+      const elapsedSec = (now - session.startTime) / 1000;
+      if (elapsedSec > 0) {
+        session.speedBytesPerSec = session.uploadedBytes / elapsedSec;
+      }
+      session.lastUpdated = now;
+    }
+
     res.json({
       success: true,
       chunkIndex: parseInt(chunkIndex, 10),
@@ -209,7 +252,7 @@ router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (r
   }
 });
 
-// 3. ULTRA-FAST Complete Multipart Upload (Direct File Descriptor Append + On-The-Fly ETag Calculation)
+// 3. Complete Multipart Upload & Mark Telemetry Complete
 router.post('/storage/:bucket/multipart/complete', async (req, res) => {
   try {
     const { bucket: bucketName } = req.params;
@@ -238,12 +281,10 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
       .filter(f => f.startsWith('chunk_'))
       .sort((a, b) => parseInt(a.split('_')[1], 10) - parseInt(b.split('_')[1], 10));
 
-    // Open target file descriptor & initialize MD5 hash in parallel
     const fileHandle = await fs.promises.open(targetFilePath, 'w');
     const hash = crypto.createHash('md5');
     let totalSizeBytes = 0;
 
-    // Fast direct buffer append & MD5 hash update on-the-fly
     for (const chunkFile of files) {
       const chunkPath = path.join(uploadDir, chunkFile);
       const chunkBuffer = await fs.promises.readFile(chunkPath);
@@ -252,16 +293,13 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
       await fileHandle.write(chunkBuffer, 0, chunkBuffer.length, totalSizeBytes);
       totalSizeBytes += chunkBuffer.length;
 
-      // Async cleanup chunk file
       fs.promises.unlink(chunkPath).catch(() => {});
     }
 
     await fileHandle.close();
 
-    // Cleanup upload folder
     try { await fs.promises.rmdir(uploadDir); } catch (_) {}
 
-    // ETag is already calculated during merge loop! Zero secondary file read required!
     const etag = `"${hash.digest('hex')}"`;
     const finalContentType = content_type || mime.lookup(file_name) || 'application/octet-stream';
 
@@ -286,6 +324,15 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
     }
 
     await logActivity('MULTIPART_UPLOAD_COMPLETE', bucketName, normalizedKey, `Fast-merged ${files.length} chunks, Size: ${totalSizeBytes} bytes`);
+
+    // Update telemetry status
+    const session = liveUploadSessions.get(uploadId);
+    if (session) {
+      session.status = 'TAMAMLANDI';
+      session.uploadedBytes = totalSizeBytes;
+      session.completedChunks = session.totalChunks;
+      session.lastUpdated = Date.now();
+    }
 
     const objectMeta = await get(
       `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
