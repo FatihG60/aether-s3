@@ -39,8 +39,106 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// GET /api/stats/daily-transfers - Filterable Daily Transfer Sessions & Metrics
+router.get('/daily-transfers', async (req, res) => {
+  try {
+    const { search = '', status = 'ALL', date } = req.query;
+
+    const dbSessions = await query(`SELECT * FROM TRANSFER_SESSIONS`);
+    const memorySessions = Array.from(liveUploadSessions.values());
+
+    // Merge memory live sessions with DB sessions
+    const sessionMap = new Map();
+
+    dbSessions.forEach(s => {
+      sessionMap.set(s.upload_id, {
+        uploadId: s.upload_id,
+        userId: s.user_id,
+        bucketName: s.bucket_name,
+        objectKey: s.object_key,
+        fileName: s.file_name,
+        fileSize: s.file_size,
+        uploadedBytes: s.uploaded_bytes || 0,
+        completedChunks: s.completed_chunks || 0,
+        totalChunks: s.total_chunks || 1,
+        status: s.status, // 'COMPLETED', 'IN_PROGRESS', 'FAILED'
+        createdAt: s.created_at,
+        updatedAt: s.updated_at
+      });
+    });
+
+    memorySessions.forEach(ms => {
+      sessionMap.set(ms.uploadId, {
+        uploadId: ms.uploadId,
+        userId: ms.userId,
+        bucketName: ms.bucketName,
+        objectKey: ms.objectKey,
+        fileName: ms.fileName,
+        fileSize: ms.fileSize,
+        uploadedBytes: ms.uploadedBytes,
+        completedChunks: ms.completedChunks,
+        totalChunks: ms.totalChunks,
+        status: ms.status === 'TAMAMLANDI' ? 'COMPLETED' : ms.status === 'HATA' ? 'FAILED' : 'IN_PROGRESS',
+        speedBytesPerSec: ms.speedBytesPerSec || 0,
+        createdAt: new Date(ms.startTime).toISOString(),
+        updatedAt: new Date(ms.lastUpdated).toISOString()
+      });
+    });
+
+    let mergedList = Array.from(sessionMap.values());
+
+    // Filter by Date (default: Today YYYY-MM-DD)
+    const targetDateStr = date || new Date().toISOString().split('T')[0];
+    const todaySessions = mergedList.filter(s => (s.updatedAt || s.createdAt).startsWith(targetDateStr));
+
+    // Calculate Today's Aggregated Metrics
+    const todayCompleted = todaySessions.filter(s => s.status === 'COMPLETED');
+    const todayOngoing = todaySessions.filter(s => s.status === 'IN_PROGRESS');
+    const todayFailed = todaySessions.filter(s => s.status === 'FAILED');
+
+    const todayCompletedBytes = todayCompleted.reduce((acc, curr) => acc + (curr.fileSize || 0), 0);
+    const todayOngoingBytes = todayOngoing.reduce((acc, curr) => acc + (curr.uploadedBytes || 0), 0);
+    const todayTotalTransferredBytes = todaySessions.reduce((acc, curr) => acc + (curr.uploadedBytes || curr.fileSize || 0), 0);
+
+    // Apply Live Search Filter (user_id, file_name, object_key)
+    let filtered = [...todaySessions];
+
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      filtered = filtered.filter(s => 
+        (s.userId && s.userId.toLowerCase().includes(q)) ||
+        (s.fileName && s.fileName.toLowerCase().includes(search.toLowerCase())) ||
+        (s.objectKey && s.objectKey.toLowerCase().includes(search.toLowerCase()))
+      );
+    }
+
+    // Apply Status Filter
+    if (status !== 'ALL') {
+      filtered = filtered.filter(s => s.status === status);
+    }
+
+    filtered.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+
+    res.json({
+      success: true,
+      metrics: {
+        targetDate: targetDateStr,
+        todayCompletedCount: todayCompleted.length,
+        todayCompletedBytes,
+        todayOngoingCount: todayOngoing.length,
+        todayOngoingBytes,
+        todayFailedCount: todayFailed.length,
+        todayTotalTransferredBytes
+      },
+      sessions: filtered
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/stats/live-uploads - Real-Time Live User Upload Monitor Telemetry
-router.get('/stats/live-uploads', (req, res) => {
+router.get('/live-uploads', (req, res) => {
   try {
     const sessions = Array.from(liveUploadSessions.values());
     const activeSessions = sessions.filter(s => s.status === 'YÜKLENİYOR');

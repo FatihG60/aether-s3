@@ -134,6 +134,17 @@ router.post('/storage/:bucket/upload', upload.single('file'), async (req, res) =
       );
     }
 
+    // Persistent Transfer Tracking Record
+    const uploadId = 'upload_single_' + Date.now();
+    await run(
+      `INSERT INTO TRANSFER_SESSIONS (upload_id, user_id, bucket_name, object_key, file_name, file_size, total_chunks, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [uploadId, userId, bucketName, objectKey, file.originalname, savedInfo.sizeBytes, 1, 'COMPLETED']
+    );
+    await run(
+      `UPDATE TRANSFER_SESSIONS SET status = 'COMPLETED', uploaded_bytes = ?, completed_chunks = 1 WHERE upload_id = ?`,
+      [savedInfo.sizeBytes, uploadId]
+    );
+
     await logActivity('UPLOAD_OBJECT', bucketName, objectKey, `Size: ${savedInfo.sizeBytes} bytes, StructuredPath: ${useStructuredPath}`);
 
     const objectMeta = await get(
@@ -177,22 +188,32 @@ router.post('/storage/:bucket/multipart/initiate', async (req, res) => {
     const uploadDir = path.join(CHUNKS_DIR, uploadId);
     await fs.promises.mkdir(uploadDir, { recursive: true });
 
-    // Register live session in telemetry state
+    const totalChunksInt = parseInt(total_chunks, 10) || 1;
+    const fileSizeInt = parseInt(file_size, 10) || 0;
+    const userStr = user_id || 'user_default';
+
+    // Telemetry memory state
     liveUploadSessions.set(uploadId, {
       uploadId,
-      userId: user_id || 'user_default',
+      userId: userStr,
       bucketName,
       objectKey: finalKey,
       fileName: file_name || finalKey,
-      totalChunks: parseInt(total_chunks, 10) || 1,
+      totalChunks: totalChunksInt,
       completedChunks: 0,
-      fileSize: parseInt(file_size, 10) || 0,
+      fileSize: fileSizeInt,
       uploadedBytes: 0,
       speedBytesPerSec: 0,
-      status: 'YÜKLENİYOR',
+      status: 'IN_PROGRESS',
       startTime: Date.now(),
       lastUpdated: Date.now()
     });
+
+    // DB Persistence Record
+    await run(
+      `INSERT INTO TRANSFER_SESSIONS (upload_id, user_id, bucket_name, object_key, file_name, file_size, total_chunks, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [uploadId, userStr, bucketName, finalKey, file_name || finalKey, fileSizeInt, totalChunksInt, 'IN_PROGRESS']
+    );
 
     res.json({
       success: true,
@@ -205,7 +226,7 @@ router.post('/storage/:bucket/multipart/initiate', async (req, res) => {
   }
 });
 
-// 2. Upload Chunk & Update Telemetry
+// 2. Upload Chunk & Update Telemetry + DB
 router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (req, res) => {
   try {
     const { uploadId, chunkIndex } = req.body;
@@ -228,6 +249,9 @@ router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (r
 
     // Telemetry Update
     const session = liveUploadSessions.get(uploadId);
+    let currentUploadedBytes = 0;
+    let currentCompletedChunks = 0;
+
     if (session) {
       session.completedChunks += 1;
       session.uploadedBytes += file.size;
@@ -237,7 +261,15 @@ router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (r
         session.speedBytesPerSec = session.uploadedBytes / elapsedSec;
       }
       session.lastUpdated = now;
+      currentUploadedBytes = session.uploadedBytes;
+      currentCompletedChunks = session.completedChunks;
     }
+
+    // Async DB update
+    run(
+      `UPDATE TRANSFER_SESSIONS SET status = 'IN_PROGRESS', uploaded_bytes = ?, completed_chunks = ? WHERE upload_id = ?`,
+      [currentUploadedBytes, currentCompletedChunks, uploadId]
+    ).catch(() => {});
 
     res.json({
       success: true,
@@ -252,7 +284,7 @@ router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (r
   }
 });
 
-// 3. Complete Multipart Upload & Mark Telemetry Complete
+// 3. Complete Multipart Upload & Mark Telemetry + DB Complete
 router.post('/storage/:bucket/multipart/complete', async (req, res) => {
   try {
     const { bucket: bucketName } = req.params;
@@ -325,14 +357,19 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
 
     await logActivity('MULTIPART_UPLOAD_COMPLETE', bucketName, normalizedKey, `Fast-merged ${files.length} chunks, Size: ${totalSizeBytes} bytes`);
 
-    // Update telemetry status
+    // Update telemetry memory & DB state
     const session = liveUploadSessions.get(uploadId);
     if (session) {
-      session.status = 'TAMAMLANDI';
+      session.status = 'COMPLETED';
       session.uploadedBytes = totalSizeBytes;
       session.completedChunks = session.totalChunks;
       session.lastUpdated = Date.now();
     }
+
+    await run(
+      `UPDATE TRANSFER_SESSIONS SET status = 'COMPLETED', uploaded_bytes = ?, completed_chunks = total_chunks WHERE upload_id = ?`,
+      [totalSizeBytes, uploadId]
+    );
 
     const objectMeta = await get(
       `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,

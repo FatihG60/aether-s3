@@ -17,7 +17,14 @@ import {
   User,
   Layers,
   Sparkles,
-  Gauge
+  Gauge,
+  Search,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  ArrowUpRight,
+  SlidersHorizontal,
+  X
 } from 'lucide-react';
 
 const API_BASE = typeof window !== 'undefined' && window.location.port === '3000' 
@@ -25,29 +32,46 @@ const API_BASE = typeof window !== 'undefined' && window.location.port === '3000
   : '';
 
 export default function OverviewTab({ stats, onNavigate }) {
-  const [telemetry, setTelemetry] = useState({
-    activeCount: 0,
-    activeUsersCount: 0,
-    totalSpeedMBps: 0,
+  const [transferSearch, setTransferSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+
+  const [dailyData, setDailyData] = useState({
+    metrics: {
+      targetDate: new Date().toISOString().split('T')[0],
+      todayCompletedCount: 0,
+      todayCompletedBytes: 0,
+      todayOngoingCount: 0,
+      todayOngoingBytes: 0,
+      todayFailedCount: 0,
+      todayTotalTransferredBytes: 0
+    },
     sessions: []
   });
 
-  // Auto-poll live user upload telemetry every 1 second
+  // Auto-poll daily transfers and live stats every 1 second
   useEffect(() => {
-    fetchLiveTelemetry();
-    const interval = setInterval(fetchLiveTelemetry, 1000);
+    fetchDailyTransfers();
+    const interval = setInterval(fetchDailyTransfers, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [transferSearch, statusFilter]);
 
-  async function fetchLiveTelemetry() {
+  async function fetchDailyTransfers() {
     try {
-      const res = await fetch(`${API_BASE}/api/stats/live-uploads`);
+      const q = new URLSearchParams({
+        search: transferSearch,
+        status: statusFilter
+      }).toString();
+
+      const res = await fetch(`${API_BASE}/api/stats/daily-transfers?${q}`);
       const data = await res.json();
-      if (data.success && data.telemetry) {
-        setTelemetry(data.telemetry);
+      if (data.success) {
+        setDailyData({
+          metrics: data.metrics,
+          sessions: data.sessions || []
+        });
       }
     } catch (err) {
-      console.error('Failed to fetch live telemetry:', err);
+      console.error('Failed to fetch daily transfers:', err);
     }
   }
 
@@ -68,6 +92,7 @@ export default function OverviewTab({ stats, onNavigate }) {
     );
   }
 
+  const { metrics, sessions } = dailyData;
   const quotaPercent = stats.totalQuotaBytes > 0 
     ? Math.min(100, Math.round((stats.totalBytesUsed / stats.totalQuotaBytes) * 100))
     : 0;
@@ -90,7 +115,7 @@ export default function OverviewTab({ stats, onNavigate }) {
               Özel S3 Storage Kontrol Paneli
             </h1>
             <p className="text-slate-400 text-sm max-w-2xl leading-relaxed">
-              AWS S3 standartlarında nesne depolama, ETag doğrulaması, Canlı Yükleme İzleme ve HMAC imzalı bağlantı servisi.
+              AWS S3 standartlarında nesne depolama, Günlük Kullanıcı Transfer Takibi ve Canlı Arama Konsolu.
             </p>
           </div>
 
@@ -107,114 +132,204 @@ export default function OverviewTab({ stats, onNavigate }) {
         </div>
       </div>
 
-      {/* 📡 REAL-TIME LIVE UPLOADS MONITOR DASHBOARD WIDGET */}
-      <div className="glass-panel p-6 border border-cyan-500/30 space-y-4 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/20">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
-          
+      {/* 📊 DAILY TRANSFERS ANALYTICS & SEARCH CONSOLE */}
+      <div className="glass-panel p-8 space-y-6 border border-cyan-500/30 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/20">
+        
+        {/* Header & Date Badge */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/10">
           <div className="flex items-center space-x-3">
-            <div className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+              <Radio className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="font-extrabold text-lg text-white flex items-center gap-2">
-                <Radio className="w-5 h-5 text-cyan-400" />
-                <span>Canlı Kullanıcı Yüklemeleri (Real-Time Live Stream Monitor)</span>
+              <h2 className="font-extrabold text-xl text-white tracking-tight">
+                Günlük Transfer İstatistikleri & Canlı Arama Konsolu
               </h2>
-              <p className="text-xs text-slate-400">Anlık bağlanan kullanıcılar ve devam eden dosya yüklemeleri.</p>
+              <p className="text-xs text-slate-400">Tarih: <strong className="text-cyan-300 font-mono">{metrics.targetDate}</strong></p>
             </div>
           </div>
 
-          <div className="flex items-center space-x-3 text-xs font-bold">
-            <span className="bg-slate-900 border border-slate-700 text-slate-300 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5 text-blue-400" />
-              <span>Aktif Kullanıcılar: <strong className="text-white font-mono">{telemetry.activeUsersCount}</strong></span>
-            </span>
+          {/* Daily Total Transferred Metric Pill */}
+          <div className="bg-gradient-to-r from-blue-900/60 to-cyan-900/60 border border-cyan-400/40 rounded-2xl px-5 py-2.5 text-xs text-white flex items-center space-x-3 shadow-xl">
+            <Gauge className="w-5 h-5 text-cyan-400" />
+            <div>
+              <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Bugün Toplam Transfer Edilen Veri</span>
+              <span className="text-lg font-extrabold font-mono text-cyan-300">{formatBytes(metrics.todayTotalTransferredBytes)}</span>
+            </div>
+          </div>
+        </div>
 
-            <span className="bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-lg">
-              <Gauge className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Anlık Hız: <strong className="text-white font-mono">{telemetry.totalSpeedMBps} MB/s</strong></span>
-            </span>
+        {/* 4 Daily Metric Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          {/* Card 1: Completed Today */}
+          <div className="p-4 rounded-xl bg-slate-950/60 border border-emerald-500/30 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-slate-400 block">Bugün Tamamlanan</span>
+              <span className="text-2xl font-extrabold text-emerald-400 font-mono">{metrics.todayCompletedCount} Dosya</span>
+              <span className="text-[11px] text-slate-400 block mt-0.5">{formatBytes(metrics.todayCompletedBytes)}</span>
+            </div>
+            <CheckCircle2 className="w-8 h-8 text-emerald-400/60" />
+          </div>
+
+          {/* Card 2: Ongoing Transfers */}
+          <div className="p-4 rounded-xl bg-slate-950/60 border border-blue-500/30 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-slate-400 block">Devam Edenler</span>
+              <span className="text-2xl font-extrabold text-blue-400 font-mono">{metrics.todayOngoingCount} Transfer</span>
+              <span className="text-[11px] text-slate-400 block mt-0.5">{formatBytes(metrics.todayOngoingBytes)}</span>
+            </div>
+            <Clock className="w-8 h-8 text-blue-400/60 animate-pulse" />
+          </div>
+
+          {/* Card 3: Failed Transfers */}
+          <div className="p-4 rounded-xl bg-slate-950/60 border border-rose-500/30 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-slate-400 block">Hata Alanlar</span>
+              <span className="text-2xl font-extrabold text-rose-400 font-mono">{metrics.todayFailedCount} Hata</span>
+              <span className="text-[11px] text-slate-400 block mt-0.5">Kesintiye uğrayanlar</span>
+            </div>
+            <AlertCircle className="w-8 h-8 text-rose-400/60" />
+          </div>
+
+          {/* Card 4: Total Active Users Today */}
+          <div className="p-4 rounded-xl bg-slate-950/60 border border-purple-500/30 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-slate-400 block">Tekil Kullanıcılar</span>
+              <span className="text-2xl font-extrabold text-purple-400 font-mono">
+                {[...new Set(sessions.map(s => s.userId))].length} Kullanıcı
+              </span>
+              <span className="text-[11px] text-slate-400 block mt-0.5">Aktif gönderim yapanlar</span>
+            </div>
+            <User className="w-8 h-8 text-purple-400/60" />
           </div>
 
         </div>
 
-        {/* Live Upload Sessions List */}
-        <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
-          {telemetry.sessions && telemetry.sessions.length > 0 ? (
-            telemetry.sessions.map((session) => {
-              const percent = session.totalChunks > 0 
-                ? Math.min(100, Math.round((session.completedChunks / session.totalChunks) * 100))
-                : 0;
+        {/* Filter & Live Search Bar */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-2">
+          
+          {/* Live Search Input */}
+          <div className="relative w-full md:w-96">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+            <input 
+              type="text"
+              placeholder="Kullanıcı Adı (user_101) veya Dosya Adı ara..."
+              value={transferSearch}
+              onChange={(e) => setTransferSearch(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-9 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono transition"
+            />
+            {transferSearch && (
+              <button onClick={() => setTransferSearch('')} className="absolute right-3 top-3 text-slate-400 hover:text-white">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
 
-              const isCompleted = session.status === 'TAMAMLANDI';
-              const speedMB = (session.speedBytesPerSec / (1024 * 1024)).toFixed(1);
+          {/* Status Filter Buttons */}
+          <div className="flex items-center space-x-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800 overflow-x-auto">
+            {[
+              { id: 'ALL', label: 'Tümü' },
+              { id: 'COMPLETED', label: 'Tamamlananlar' },
+              { id: 'IN_PROGRESS', label: 'Devam Edenler' },
+              { id: 'FAILED', label: 'Hata Alanlar' }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setStatusFilter(tab.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                  statusFilter === tab.id 
+                    ? 'bg-blue-600 text-white shadow-md' 
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
 
-              return (
-                <div 
-                  key={session.uploadId}
-                  className={`p-4 rounded-xl border transition-all duration-200 ${
-                    isCompleted 
-                      ? 'bg-slate-950/60 border-emerald-500/30' 
-                      : 'bg-slate-900/80 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
-                  }`}
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                    <div className="flex items-center space-x-3 min-w-0">
-                      <span className="bg-blue-500/10 border border-blue-500/20 text-blue-300 font-mono text-xs font-bold px-2.5 py-0.5 rounded-md shrink-0 flex items-center gap-1">
-                        <User className="w-3 h-3" />
-                        <span>{session.userId}</span>
-                      </span>
-
-                      <div className="truncate">
-                        <span className="font-bold text-white text-sm font-mono truncate block">{session.fileName}</span>
-                        <span className="text-[11px] text-slate-400">Bucket: <strong className="text-slate-300">{session.bucketName}</strong></span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-3 text-xs shrink-0">
-                      {!isCompleted && (
-                        <span className="font-mono text-cyan-400 font-bold bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded">
-                          ⚡ {speedMB} MB/s
-                        </span>
-                      )}
-
-                      <span className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] ${
-                        isCompleted 
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
-                          : 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 animate-pulse'
-                      }`}>
-                        {session.status}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Progress bar */}
-                  <div className="space-y-1 mt-3">
-                    <div className="flex justify-between text-[11px] font-mono text-slate-400">
-                      <span>Parça: {session.completedChunks} / {session.totalChunks}</span>
-                      <span>{formatBytes(session.uploadedBytes)} / {formatBytes(session.fileSize)} (%{percent})</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-white/5">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          isCompleted ? 'bg-emerald-500' : 'bg-gradient-to-r from-blue-500 to-cyan-400'
-                        }`} 
-                        style={{ width: `${percent}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            <div className="text-center py-10 text-slate-500 space-y-1">
-              <Radio className="w-8 h-8 mx-auto text-slate-700" />
-              <p className="text-sm font-medium">Şu an aktif canlı yükleme yapan kullanıcı bulunmuyor.</p>
-              <p className="text-xs text-slate-400">Bir dosya yüklemesi başladığında anlık olarak bu ekrana yansıyacaktır.</p>
-            </div>
-          )}
         </div>
+
+        {/* Transfer Sessions Data Table */}
+        <div className="glass-panel overflow-hidden border border-white/5 bg-slate-950/60">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-300">
+              <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-bold border-b border-white/10 text-[11px]">
+                <tr>
+                  <th className="px-5 py-3.5">Kullanıcı (User ID)</th>
+                  <th className="px-5 py-3.5">Dosya Adı & Object Key</th>
+                  <th className="px-5 py-3.5">İlerleme / Parçalar</th>
+                  <th className="px-5 py-3.5">Transfer Edilen / Toplam</th>
+                  <th className="px-5 py-3.5">Durum</th>
+                  <th className="px-5 py-3.5 text-right">Tarih / Saat</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {sessions.length > 0 ? (
+                  sessions.map((s) => {
+                    const percent = s.totalChunks > 0 
+                      ? Math.min(100, Math.round((s.completedChunks / s.totalChunks) * 100))
+                      : 0;
+
+                    const isDone = s.status === 'COMPLETED';
+                    const isFailed = s.status === 'FAILED';
+
+                    return (
+                      <tr key={s.uploadId} className="hover:bg-slate-900/60 transition duration-150">
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          <span className="bg-blue-500/10 border border-blue-500/20 text-blue-300 font-mono text-xs font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5">
+                            <User className="w-3.5 h-3.5" />
+                            <span>{s.userId || 'user_default'}</span>
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 max-w-xs truncate">
+                          <span className="font-bold text-white block truncate text-sm">{s.fileName}</span>
+                          <span className="text-[11px] text-slate-400 font-mono block truncate">{s.objectKey}</span>
+                        </td>
+                        <td className="px-5 py-4 font-mono">
+                          <div className="space-y-1 min-w-[120px]">
+                            <div className="flex justify-between text-[11px] text-slate-400">
+                              <span>Parça {s.completedChunks}/{s.totalChunks}</span>
+                              <span className="font-bold text-cyan-400">%{percent}</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full ${isDone ? 'bg-emerald-500' : isFailed ? 'bg-rose-500' : 'bg-cyan-400'}`} style={{ width: `${percent}%` }}></div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 font-mono whitespace-nowrap font-semibold">
+                          <span className="text-slate-200">{formatBytes(s.uploadedBytes)}</span>
+                          <span className="text-slate-400"> / {formatBytes(s.fileSize)}</span>
+                        </td>
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                            isDone 
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                              : isFailed
+                              ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                              : 'bg-blue-500/10 text-blue-300 border-blue-500/30 animate-pulse'
+                          }`}>
+                            {isDone ? 'TAMAMLANDI' : isFailed ? 'HATALI' : 'DEVAM EDİYOR'}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 text-right font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                          {new Date(s.updatedAt || s.createdAt).toLocaleTimeString('tr-TR')}
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan="6" className="text-center py-12 text-slate-500">
+                      Filtreleme kriterinize uygun transfer kaydı bulunamadı.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
 
       {/* 4 Stat Cards */}

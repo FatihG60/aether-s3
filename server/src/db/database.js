@@ -17,6 +17,7 @@ let state = {
   buckets: [],
   objects: [],
   object_versions: [],
+  transfer_sessions: [],
   api_keys: [],
   presigned_urls: [],
   activity_logs: []
@@ -44,6 +45,7 @@ function loadState() {
 
   // Ensure arrays exist
   if (!state.object_versions) state.object_versions = [];
+  if (!state.transfer_sessions) state.transfer_sessions = [];
 
   // Migration for objects schema
   state.objects.forEach(obj => {
@@ -86,7 +88,7 @@ export async function initDatabase() {
     saveState();
   }
 
-  console.log('✅ Custom S3 Storage Engine Database (Versioning & Trash Bin Enabled) initialized.');
+  console.log('✅ Custom S3 Storage Engine Database (Daily Transfer Tracking & Persistence Enabled) initialized.');
 }
 
 // --- Query methods ---
@@ -112,19 +114,16 @@ export async function query(sql, params = []) {
   if (cleanSql.includes('FROM OBJECTS')) {
     let result = [...state.objects];
 
-    // Filter Trash Bin vs Active
     if (cleanSql.includes('IS_DELETED = 1')) {
       result = result.filter(o => o.is_deleted === 1);
     } else {
       result = result.filter(o => !o.is_deleted);
     }
 
-    // Filter by bucket_name
     if (params[0] && typeof params[0] === 'string' && !cleanSql.includes('LIKE')) {
       result = result.filter(o => o.bucket_name === params[0]);
     }
 
-    // Handle search/prefix
     if (params.length > 1 && cleanSql.includes('LIKE')) {
       const bucket = params[0];
       result = result.filter(o => o.bucket_name === bucket);
@@ -139,6 +138,11 @@ export async function query(sql, params = []) {
     }
 
     return result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }
+
+  if (cleanSql.includes('FROM TRANSFER_SESSIONS')) {
+    let result = [...state.transfer_sessions];
+    return result.sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
   }
 
   if (cleanSql.includes('FROM OBJECT_VERSIONS')) {
@@ -196,6 +200,11 @@ export async function get(sql, params = []) {
     }
   }
 
+  if (cleanSql.includes('FROM TRANSFER_SESSIONS')) {
+    const uploadId = params[0];
+    return state.transfer_sessions.find(s => s.upload_id === uploadId) || null;
+  }
+
   if (cleanSql.includes('FROM API_KEYS')) {
     if (params.length > 0) {
       return state.api_keys.find(k => k.access_key === params[0]) || null;
@@ -251,6 +260,50 @@ export async function run(sql, params = []) {
     return { changes: initialLen - state.buckets.length };
   }
 
+  if (cleanSql.startsWith('INSERT INTO TRANSFER_SESSIONS')) {
+    const [upload_id, user_id, bucket_name, object_key, file_name, file_size, total_chunks, status] = params;
+    const existing = state.transfer_sessions.find(s => s.upload_id === upload_id);
+    if (existing) {
+      existing.status = status;
+      existing.updated_at = new Date().toISOString();
+      saveState();
+      return { changes: 1 };
+    }
+    const newId = state.transfer_sessions.length > 0 ? Math.max(...state.transfer_sessions.map(s => s.id)) + 1 : 1;
+    state.transfer_sessions.push({
+      id: newId,
+      upload_id,
+      user_id: user_id || 'user_default',
+      bucket_name,
+      object_key,
+      file_name,
+      file_size: file_size || 0,
+      uploaded_bytes: 0,
+      completed_chunks: 0,
+      total_chunks: total_chunks || 1,
+      status: status || 'IN_PROGRESS',
+      error_message: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+    saveState();
+    return { lastID: newId, changes: 1 };
+  }
+
+  if (cleanSql.startsWith('UPDATE TRANSFER_SESSIONS')) {
+    const [status, uploaded_bytes, completed_chunks, upload_id] = params;
+    const session = state.transfer_sessions.find(s => s.upload_id === upload_id);
+    if (session) {
+      session.status = status || session.status;
+      if (uploaded_bytes !== undefined) session.uploaded_bytes = uploaded_bytes;
+      if (completed_chunks !== undefined) session.completed_chunks = completed_chunks;
+      session.updated_at = new Date().toISOString();
+      saveState();
+      return { changes: 1 };
+    }
+    return { changes: 0 };
+  }
+
   if (cleanSql.startsWith('INSERT INTO OBJECTS')) {
     const [bucket_name, object_key, file_name, file_path, size_bytes, content_type, etag, is_public, user_id, version_id] = params;
     const newId = state.objects.length > 0 ? Math.max(...state.objects.map(o => o.id)) + 1 : 1;
@@ -277,26 +330,6 @@ export async function run(sql, params = []) {
     return { lastID: newId, changes: 1 };
   }
 
-  if (cleanSql.startsWith('INSERT INTO OBJECT_VERSIONS')) {
-    const [object_id, bucket_name, object_key, file_name, file_path, size_bytes, content_type, etag, version_id] = params;
-    const newId = state.object_versions.length > 0 ? Math.max(...state.object_versions.map(v => v.id)) + 1 : 1;
-    state.object_versions.push({
-      id: newId,
-      object_id,
-      bucket_name,
-      object_key,
-      file_name,
-      file_path,
-      size_bytes,
-      content_type,
-      etag,
-      version_id,
-      created_at: new Date().toISOString()
-    });
-    saveState();
-    return { lastID: newId, changes: 1 };
-  }
-
   if (cleanSql.startsWith('UPDATE OBJECTS')) {
     if (cleanSql.includes('SET IS_DELETED = 1')) {
       const id = params[0];
@@ -319,7 +352,6 @@ export async function run(sql, params = []) {
     const [size_bytes, content_type, etag, is_public, file_path, version_id, id] = params;
     const obj = state.objects.find(o => o.id === id);
     if (obj) {
-      // Archive current version into object_versions before updating
       state.object_versions.push({
         id: state.object_versions.length + 1,
         object_id: obj.id,
