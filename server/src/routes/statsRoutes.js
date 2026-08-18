@@ -45,39 +45,75 @@ const handleDailyTransfers = async (req, res) => {
     const { search = '', status = 'ALL', date } = req.query;
 
     const dbSessions = await query(`SELECT * FROM TRANSFER_SESSIONS`);
+    const dbObjects = await query(`SELECT * FROM OBJECTS`);
     const memorySessions = Array.from(liveUploadSessions.values());
 
     const sessionMap = new Map();
 
+    // 1. Load DB Transfer Sessions
     dbSessions.forEach(s => {
+      const isCompleted = s.status === 'COMPLETED';
+      const fSize = s.file_size || 0;
+      const tChunks = s.total_chunks || 1;
+
       sessionMap.set(s.upload_id, {
         uploadId: s.upload_id,
-        userId: s.user_id,
+        userId: s.user_id || 'user_default',
         bucketName: s.bucket_name,
         objectKey: s.object_key,
         fileName: s.file_name,
-        fileSize: s.file_size,
-        uploadedBytes: s.uploaded_bytes || 0,
-        completedChunks: s.completed_chunks || 0,
-        totalChunks: s.total_chunks || 1,
+        fileSize: fSize,
+        uploadedBytes: isCompleted ? fSize : (s.uploaded_bytes || 0),
+        completedChunks: isCompleted ? tChunks : (s.completed_chunks || 0),
+        totalChunks: tChunks,
         status: s.status, // 'COMPLETED', 'IN_PROGRESS', 'FAILED'
         createdAt: s.created_at,
-        updatedAt: s.updated_at
+        updatedAt: s.updated_at || s.created_at
       });
     });
 
+    // 2. Include all uploaded OBJECTS as Completed Sessions for 100% accuracy
+    dbObjects.forEach(obj => {
+      const objectSessionId = `object_${obj.id}_${obj.object_key}`;
+      const existsInSessions = Array.from(sessionMap.values()).some(
+        s => s.objectKey === obj.object_key && s.status === 'COMPLETED'
+      );
+
+      if (!existsInSessions) {
+        sessionMap.set(objectSessionId, {
+          uploadId: objectSessionId,
+          userId: obj.user_id || 'user_default',
+          bucketName: obj.bucket_name,
+          objectKey: obj.object_key,
+          fileName: obj.file_name || obj.object_key,
+          fileSize: obj.size_bytes || 0,
+          uploadedBytes: obj.size_bytes || 0,
+          completedChunks: 1,
+          totalChunks: 1,
+          status: 'COMPLETED',
+          createdAt: obj.created_at,
+          updatedAt: obj.updated_at || obj.created_at
+        });
+      }
+    });
+
+    // 3. Merge active live memory sessions
     memorySessions.forEach(ms => {
+      const isCompleted = ms.status === 'TAMAMLANDI' || ms.status === 'COMPLETED';
+      const fSize = ms.fileSize || 0;
+      const tChunks = ms.totalChunks || 1;
+
       sessionMap.set(ms.uploadId, {
         uploadId: ms.uploadId,
-        userId: ms.userId,
+        userId: ms.userId || 'user_default',
         bucketName: ms.bucketName,
         objectKey: ms.objectKey,
         fileName: ms.fileName,
-        fileSize: ms.fileSize,
-        uploadedBytes: ms.uploadedBytes,
-        completedChunks: ms.completedChunks,
-        totalChunks: ms.totalChunks,
-        status: ms.status === 'TAMAMLANDI' ? 'COMPLETED' : ms.status === 'HATA' ? 'FAILED' : 'IN_PROGRESS',
+        fileSize: fSize,
+        uploadedBytes: isCompleted ? fSize : (ms.uploadedBytes || 0),
+        completedChunks: isCompleted ? tChunks : (ms.completedChunks || 0),
+        totalChunks: tChunks,
+        status: isCompleted ? 'COMPLETED' : ms.status === 'HATA' ? 'FAILED' : 'IN_PROGRESS',
         speedBytesPerSec: ms.speedBytesPerSec || 0,
         createdAt: new Date(ms.startTime).toISOString(),
         updatedAt: new Date(ms.lastUpdated).toISOString()
@@ -88,7 +124,10 @@ const handleDailyTransfers = async (req, res) => {
 
     // Filter by Date (default: Today YYYY-MM-DD)
     const targetDateStr = date || new Date().toISOString().split('T')[0];
-    const todaySessions = mergedList.filter(s => (s.updatedAt || s.createdAt).startsWith(targetDateStr));
+    const todaySessions = mergedList.filter(s => {
+      const sDate = (s.updatedAt || s.createdAt || '').split('T')[0];
+      return sDate === targetDateStr;
+    });
 
     // Calculate Today's Aggregated Metrics
     const todayCompleted = todaySessions.filter(s => s.status === 'COMPLETED');
@@ -116,7 +155,7 @@ const handleDailyTransfers = async (req, res) => {
       filtered = filtered.filter(s => s.status === status);
     }
 
-    filtered.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    filtered.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
 
     res.json({
       success: true,

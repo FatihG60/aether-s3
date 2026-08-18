@@ -267,12 +267,17 @@ export default function OverviewTab({ stats, onNavigate }) {
               <tbody className="divide-y divide-white/5">
                 {sessions.length > 0 ? (
                   sessions.map((s) => {
-                    const percent = s.totalChunks > 0 
-                      ? Math.min(100, Math.round((s.completedChunks / s.totalChunks) * 100))
-                      : 0;
-
                     const isDone = s.status === 'COMPLETED';
                     const isFailed = s.status === 'FAILED';
+
+                    const currentCompletedChunks = isDone ? (s.totalChunks || 1) : s.completedChunks;
+                    const currentUploadedBytes = isDone ? s.fileSize : s.uploadedBytes;
+
+                    const percent = isDone 
+                      ? 100 
+                      : s.totalChunks > 0 
+                      ? Math.min(100, Math.round((currentCompletedChunks / s.totalChunks) * 100))
+                      : 0;
 
                     return (
                       <tr key={s.uploadId} className="hover:bg-slate-900/60 transition duration-150">
@@ -289,7 +294,7 @@ export default function OverviewTab({ stats, onNavigate }) {
                         <td className="px-5 py-4 font-mono">
                           <div className="space-y-1 min-w-[120px]">
                             <div className="flex justify-between text-[11px] text-slate-400">
-                              <span>Parça {s.completedChunks}/{s.totalChunks}</span>
+                              <span>Parça {currentCompletedChunks}/{s.totalChunks || 1}</span>
                               <span className="font-bold text-cyan-400">%{percent}</span>
                             </div>
                             <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
@@ -298,7 +303,7 @@ export default function OverviewTab({ stats, onNavigate }) {
                           </div>
                         </td>
                         <td className="px-5 py-4 font-mono whitespace-nowrap font-semibold">
-                          <span className="text-slate-200">{formatBytes(s.uploadedBytes)}</span>
+                          <span className="text-slate-200">{formatBytes(currentUploadedBytes)}</span>
                           <span className="text-slate-400"> / {formatBytes(s.fileSize)}</span>
                         </td>
                         <td className="px-5 py-4 whitespace-nowrap">
