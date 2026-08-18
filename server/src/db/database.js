@@ -1,0 +1,340 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const DATA_DIR = path.join(__dirname, '../../data');
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+const DB_FILE = path.join(DATA_DIR, 's3_storage.json');
+
+// Memory state of DB
+let state = {
+  buckets: [],
+  objects: [],
+  api_keys: [],
+  presigned_urls: [],
+  activity_logs: []
+};
+
+// Save DB state to file asynchronously
+function saveState() {
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save DB file:', err);
+  }
+}
+
+// Load DB state from file
+function loadState() {
+  if (fs.existsSync(DB_FILE)) {
+    try {
+      const data = fs.readFileSync(DB_FILE, 'utf8');
+      state = { ...state, ...JSON.parse(data) };
+    } catch (err) {
+      console.error('Failed to load DB file, starting fresh:', err);
+    }
+  }
+}
+
+export async function initDatabase() {
+  loadState();
+
+  // Seed default bucket if empty
+  if (state.buckets.length === 0) {
+    state.buckets.push({
+      id: 1,
+      name: 'general-storage',
+      region: 'eu-central-1',
+      is_public: 1,
+      quota_bytes: 10737418240, // 10 GB
+      created_at: new Date().toISOString()
+    });
+    saveState();
+  }
+
+  // Seed default API key if empty
+  if (state.api_keys.length === 0) {
+    const accessKey = 'AKIA' + Math.random().toString(36).substring(2, 10).toUpperCase() + 'S3';
+    const secretKey = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+    state.api_keys.push({
+      id: 1,
+      access_key: accessKey,
+      secret_key: secretKey,
+      name: 'Master Admin Key',
+      created_at: new Date().toISOString()
+    });
+    saveState();
+  }
+
+  console.log('✅ Custom S3 Storage Engine Database initialized.');
+}
+
+// --- Query methods ---
+
+export async function query(sql, params = []) {
+  const cleanSql = sql.trim().toUpperCase();
+
+  if (cleanSql.includes('FROM BUCKETS')) {
+    if (cleanSql.includes('COUNT(O.ID)') || cleanSql.includes('LEFT JOIN OBJECTS')) {
+      return state.buckets.map(b => {
+        const bucketObjs = state.objects.filter(o => o.bucket_name === b.name);
+        const total_bytes = bucketObjs.reduce((acc, curr) => acc + (curr.size_bytes || 0), 0);
+        return {
+          ...b,
+          object_count: bucketObjs.length,
+          total_bytes: total_bytes
+        };
+      });
+    }
+    return [...state.buckets];
+  }
+
+  if (cleanSql.includes('FROM OBJECTS')) {
+    let result = [...state.objects];
+
+    // Filter by bucket_name
+    if (params[0] && typeof params[0] === 'string' && !cleanSql.includes('LIKE')) {
+      result = result.filter(o => o.bucket_name === params[0]);
+    }
+
+    // Handle search/prefix
+    if (params.length > 1 && cleanSql.includes('LIKE')) {
+      const bucket = params[0];
+      result = result.filter(o => o.bucket_name === bucket);
+      
+      const searchPattern = params[1] ? params[1].replace(/%/g, '').toLowerCase() : '';
+      if (searchPattern) {
+        result = result.filter(o => 
+          (o.file_name && o.file_name.toLowerCase().includes(searchPattern)) ||
+          (o.object_key && o.object_key.toLowerCase().includes(searchPattern))
+        );
+      }
+    }
+
+    return result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }
+
+  if (cleanSql.includes('FROM API_KEYS')) {
+    return [...state.api_keys];
+  }
+
+  if (cleanSql.includes('FROM ACTIVITY_LOGS')) {
+    return [...state.activity_logs].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  }
+
+  return [];
+}
+
+export async function get(sql, params = []) {
+  const cleanSql = sql.trim().toUpperCase();
+
+  if (cleanSql.includes('FROM BUCKETS')) {
+    const bucketName = params[0];
+    const b = state.buckets.find(item => item.name === bucketName);
+    if (!b) return null;
+
+    const bucketObjs = state.objects.filter(o => o.bucket_name === b.name);
+    const total_bytes = bucketObjs.reduce((acc, curr) => acc + (curr.size_bytes || 0), 0);
+    return {
+      ...b,
+      object_count: bucketObjs.length,
+      total_bytes: total_bytes
+    };
+  }
+
+  if (cleanSql.includes('FROM OBJECTS')) {
+    if (cleanSql.includes('SUM(SIZE_BYTES)') || cleanSql.includes('COALESCE')) {
+      const bucketName = params[0];
+      const bucketObjs = state.objects.filter(o => o.bucket_name === bucketName);
+      const total = bucketObjs.reduce((acc, curr) => acc + (curr.size_bytes || 0), 0);
+      return { total };
+    }
+    if (cleanSql.includes('BUCKET_NAME = ? AND OBJECT_KEY = ?')) {
+      const [bucketName, objectKey] = params;
+      return state.objects.find(o => o.bucket_name === bucketName && o.object_key === objectKey) || null;
+    }
+    if (cleanSql.includes('COUNT(*)')) {
+      const bucketName = params[0];
+      const count = state.objects.filter(o => o.bucket_name === bucketName).length;
+      return { count };
+    }
+  }
+
+  if (cleanSql.includes('FROM API_KEYS')) {
+    if (params.length > 0) {
+      return state.api_keys.find(k => k.access_key === params[0]) || null;
+    }
+    return state.api_keys[0] || null;
+  }
+
+  if (cleanSql.includes('FROM PRESIGNED_URLS')) {
+    const token = params[0];
+    return state.presigned_urls.find(p => p.token === token) || null;
+  }
+
+  return null;
+}
+
+export async function run(sql, params = []) {
+  const cleanSql = sql.trim().toUpperCase();
+
+  if (cleanSql.startsWith('INSERT INTO BUCKETS')) {
+    const [name, region, is_public, quota_bytes] = params;
+    const newId = state.buckets.length > 0 ? Math.max(...state.buckets.map(b => b.id)) + 1 : 1;
+    const newBucket = {
+      id: newId,
+      name,
+      region: region || 'us-east-1',
+      is_public: is_public ? 1 : 0,
+      quota_bytes: quota_bytes || 10737418240,
+      created_at: new Date().toISOString()
+    };
+    state.buckets.push(newBucket);
+    saveState();
+    return { lastID: newId, changes: 1 };
+  }
+
+  if (cleanSql.startsWith('UPDATE BUCKETS')) {
+    const [is_public, quota_bytes, region, name] = params;
+    const b = state.buckets.find(item => item.name === name);
+    if (b) {
+      b.is_public = is_public;
+      b.quota_bytes = quota_bytes;
+      b.region = region;
+      saveState();
+      return { changes: 1 };
+    }
+    return { changes: 0 };
+  }
+
+  if (cleanSql.startsWith('DELETE FROM BUCKETS')) {
+    const name = params[0];
+    const initialLen = state.buckets.length;
+    state.buckets = state.buckets.filter(b => b.name !== name);
+    saveState();
+    return { changes: initialLen - state.buckets.length };
+  }
+
+  if (cleanSql.startsWith('INSERT INTO OBJECTS')) {
+    const [bucket_name, object_key, file_name, file_path, size_bytes, content_type, etag, is_public] = params;
+    const newId = state.objects.length > 0 ? Math.max(...state.objects.map(o => o.id)) + 1 : 1;
+    const newObj = {
+      id: newId,
+      bucket_name,
+      object_key,
+      file_name,
+      file_path,
+      size_bytes,
+      content_type: content_type || 'application/octet-stream',
+      etag,
+      is_public: is_public ? 1 : 0,
+      metadata_json: '{}',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    state.objects.push(newObj);
+    saveState();
+    return { lastID: newId, changes: 1 };
+  }
+
+  if (cleanSql.startsWith('UPDATE OBJECTS')) {
+    const [size_bytes, content_type, etag, is_public, file_path, id] = params;
+    const obj = state.objects.find(o => o.id === id);
+    if (obj) {
+      obj.size_bytes = size_bytes;
+      obj.content_type = content_type;
+      obj.etag = etag;
+      obj.is_public = is_public;
+      obj.file_path = file_path;
+      obj.updated_at = new Date().toISOString();
+      saveState();
+      return { changes: 1 };
+    }
+    return { changes: 0 };
+  }
+
+  if (cleanSql.startsWith('DELETE FROM OBJECTS')) {
+    if (cleanSql.includes('WHERE BUCKET_NAME = ?')) {
+      const bucketName = params[0];
+      const initial = state.objects.length;
+      state.objects = state.objects.filter(o => o.bucket_name !== bucketName);
+      saveState();
+      return { changes: initial - state.objects.length };
+    }
+    if (cleanSql.includes('WHERE ID = ?')) {
+      const id = params[0];
+      const initial = state.objects.length;
+      state.objects = state.objects.filter(o => o.id !== id);
+      saveState();
+      return { changes: initial - state.objects.length };
+    }
+  }
+
+  if (cleanSql.startsWith('INSERT INTO PRESIGNED_URLS')) {
+    const [token, bucket_name, object_key, action, expires_at] = params;
+    const newId = state.presigned_urls.length > 0 ? Math.max(...state.presigned_urls.map(p => p.id)) + 1 : 1;
+    state.presigned_urls.push({
+      id: newId,
+      token,
+      bucket_name,
+      object_key,
+      action,
+      expires_at,
+      created_at: new Date().toISOString()
+    });
+    saveState();
+    return { lastID: newId, changes: 1 };
+  }
+
+  if (cleanSql.startsWith('INSERT INTO API_KEYS')) {
+    const [access_key, secret_key, name] = params;
+    const newId = state.api_keys.length > 0 ? Math.max(...state.api_keys.map(k => k.id)) + 1 : 1;
+    state.api_keys.push({
+      id: newId,
+      access_key,
+      secret_key,
+      name,
+      created_at: new Date().toISOString()
+    });
+    saveState();
+    return { lastID: newId, changes: 1 };
+  }
+
+  if (cleanSql.startsWith('DELETE FROM API_KEYS')) {
+    const id = params[0];
+    const initial = state.api_keys.length;
+    state.api_keys = state.api_keys.filter(k => k.id !== parseInt(id, 10));
+    saveState();
+    return { changes: initial - state.api_keys.length };
+  }
+
+  return { changes: 0 };
+}
+
+export async function logActivity(action, bucketName, objectKey, details) {
+  try {
+    const newId = state.activity_logs.length > 0 ? Math.max(...state.activity_logs.map(l => l.id)) + 1 : 1;
+    state.activity_logs.unshift({
+      id: newId,
+      action,
+      bucket_name: bucketName || null,
+      object_key: objectKey || null,
+      details: details || null,
+      timestamp: new Date().toISOString()
+    });
+
+    // Cap logs at 200 items
+    if (state.activity_logs.length > 200) {
+      state.activity_logs = state.activity_logs.slice(0, 200);
+    }
+    saveState();
+  } catch (err) {
+    console.error('Failed to log activity:', err);
+  }
+}
