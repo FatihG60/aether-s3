@@ -24,7 +24,12 @@ import {
   Clock,
   ArrowUpRight,
   SlidersHorizontal,
-  X
+  X,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 const API_BASE = typeof window !== 'undefined' && window.location.port === '3000' 
@@ -34,6 +39,12 @@ const API_BASE = typeof window !== 'undefined' && window.location.port === '3000
 export default function OverviewTab({ stats, onNavigate }) {
   const [transferSearch, setTransferSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+
+  // Sorting & Pagination State for Daily Transfers
+  const [sortField, setSortField] = useState('updatedAt');
+  const [sortDir, setSortDir] = useState('desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const [dailyData, setDailyData] = useState({
     metrics: {
@@ -55,6 +66,10 @@ export default function OverviewTab({ stats, onNavigate }) {
     return () => clearInterval(interval);
   }, [transferSearch, statusFilter]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [transferSearch, statusFilter, pageSize, sortField, sortDir]);
+
   async function fetchDailyTransfers() {
     try {
       const q = new URLSearchParams({
@@ -75,12 +90,28 @@ export default function OverviewTab({ stats, onNavigate }) {
     }
   }
 
+  function handleSort(field) {
+    if (sortField === field) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  }
+
   function formatBytes(bytes, decimals = 1) {
     if (!bytes || bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i];
+  }
+
+  function renderSortIcon(field) {
+    if (sortField !== field) return <ArrowUpDown className="w-3.5 h-3.5 text-slate-600 inline ml-1" />;
+    return sortDir === 'asc' 
+      ? <ArrowUp className="w-3.5 h-3.5 text-cyan-400 inline ml-1" />
+      : <ArrowDown className="w-3.5 h-3.5 text-cyan-400 inline ml-1" />;
   }
 
   if (!stats) {
@@ -93,6 +124,25 @@ export default function OverviewTab({ stats, onNavigate }) {
   }
 
   const { metrics, sessions } = dailyData;
+
+  const sortedSessions = [...sessions].sort((a, b) => {
+    let valA = a[sortField];
+    let valB = b[sortField];
+
+    if (valA === undefined || valA === null) valA = '';
+    if (valB === undefined || valB === null) valB = '';
+
+    if (typeof valA === 'string') valA = valA.toLowerCase();
+    if (typeof valB === 'string') valB = valB.toLowerCase();
+
+    if (valA < valB) return sortDir === 'asc' ? -1 : 1;
+    if (valA > valB) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const totalPages = Math.ceil(sortedSessions.length / pageSize) || 1;
+  const paginatedSessions = sortedSessions.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   const quotaPercent = stats.totalQuotaBytes > 0 
     ? Math.min(100, Math.round((stats.totalBytesUsed / stats.totalQuotaBytes) * 100))
     : 0;
@@ -115,7 +165,7 @@ export default function OverviewTab({ stats, onNavigate }) {
               Özel S3 Storage Kontrol Paneli
             </h1>
             <p className="text-slate-400 text-sm max-w-2xl leading-relaxed">
-              AWS S3 standartlarında nesne depolama, Günlük Kullanıcı Transfer Takibi ve Canlı Arama Konsolu.
+              AWS S3 standartlarında nesne depolama, Günlük Kullanıcı Transfer Takibi ve Sayfalamalı/Sıralamalı Arama Konsolu.
             </p>
           </div>
 
@@ -132,7 +182,7 @@ export default function OverviewTab({ stats, onNavigate }) {
         </div>
       </div>
 
-      {/* 📊 DAILY TRANSFERS ANALYTICS & SEARCH CONSOLE */}
+      {/* 📊 DAILY TRANSFERS ANALYTICS & SEARCH CONSOLE WITH PAGINATION & SORTING */}
       <div className="glass-panel p-8 space-y-6 border border-cyan-500/30 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950/20">
         
         {/* Header & Date Badge */}
@@ -250,23 +300,35 @@ export default function OverviewTab({ stats, onNavigate }) {
 
         </div>
 
-        {/* Transfer Sessions Data Table */}
+        {/* Transfer Sessions Data Table with Sorting */}
         <div className="glass-panel overflow-hidden border border-white/5 bg-slate-950/60">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-bold border-b border-white/10 text-[11px]">
                 <tr>
-                  <th className="px-5 py-3.5">Kullanıcı (User ID)</th>
-                  <th className="px-5 py-3.5">Dosya Adı & Object Key</th>
-                  <th className="px-5 py-3.5">İlerleme / Parçalar</th>
-                  <th className="px-5 py-3.5">Transfer Edilen / Toplam</th>
-                  <th className="px-5 py-3.5">Durum</th>
-                  <th className="px-5 py-3.5 text-right">Tarih / Saat</th>
+                  <th onClick={() => handleSort('userId')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Kullanıcı (User ID) {renderSortIcon('userId')}
+                  </th>
+                  <th onClick={() => handleSort('fileName')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Dosya Adı & Object Key {renderSortIcon('fileName')}
+                  </th>
+                  <th onClick={() => handleSort('completedChunks')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    İlerleme / Parçalar {renderSortIcon('completedChunks')}
+                  </th>
+                  <th onClick={() => handleSort('fileSize')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Transfer Edilen / Toplam {renderSortIcon('fileSize')}
+                  </th>
+                  <th onClick={() => handleSort('status')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Durum {renderSortIcon('status')}
+                  </th>
+                  <th onClick={() => handleSort('updatedAt')} className="px-5 py-3.5 text-right cursor-pointer hover:text-white transition select-none">
+                    Tarih / Saat {renderSortIcon('updatedAt')}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {sessions.length > 0 ? (
-                  sessions.map((s) => {
+                {paginatedSessions.length > 0 ? (
+                  paginatedSessions.map((s) => {
                     const isDone = s.status === 'COMPLETED';
                     const isFailed = s.status === 'FAILED';
 
@@ -332,6 +394,48 @@ export default function OverviewTab({ stats, onNavigate }) {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* PAGINATION FOOTER BAR FOR DAILY TRANSFERS */}
+          <div className="p-4 bg-slate-950/80 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-slate-400">
+            <div className="flex items-center space-x-3">
+              <span>Sayfa Başına Göster:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-white text-xs font-mono focus:outline-none focus:border-cyan-500"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <span>Toplam <strong className="text-white font-mono">{sortedSessions.length}</strong> kayıttan <strong className="text-white font-mono">{Math.min(sortedSessions.length, (currentPage - 1) * pageSize + 1)}-{Math.min(sortedSessions.length, currentPage * pageSize)}</strong> gösteriliyor</span>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>Önceki</span>
+              </button>
+
+              <span className="px-3 py-1.5 font-mono text-xs font-bold text-slate-300 bg-slate-900 border border-white/5 rounded-lg">
+                Sayfa {currentPage} / {totalPages}
+              </span>
+
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
+              >
+                <span>Sonraki</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
 

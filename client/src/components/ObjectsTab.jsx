@@ -24,7 +24,12 @@ import {
   GitBranch,
   ShieldCheck,
   CheckSquare,
-  Square
+  Square,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 const API_BASE = typeof window !== 'undefined' && window.location.port === '3000' 
@@ -52,6 +57,12 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
   // Multi-select for ZIP download
   const [selectedKeys, setSelectedKeys] = useState([]);
 
+  // Sorting & Pagination State
+  const [sortField, setSortField] = useState('created_at');
+  const [sortDir, setSortDir] = useState('desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -60,6 +71,11 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       fetchTrash();
     }
   }, [selectedBucket, search, viewMode]);
+
+  // Reset page when search or viewMode changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, viewMode, pageSize, sortField, sortDir]);
 
   async function fetchObjects() {
     if (!selectedBucket) return;
@@ -90,6 +106,37 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       console.error(err);
     }
   }
+
+  // Handle Sort
+  function handleSort(field) {
+    if (sortField === field) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  }
+
+  // Get Sorted & Paginated Data
+  const targetList = viewMode === 'active' ? objects : trashObjects;
+  
+  const sortedObjects = [...targetList].sort((a, b) => {
+    let valA = a[sortField];
+    let valB = b[sortField];
+
+    if (valA === undefined || valA === null) valA = '';
+    if (valB === undefined || valB === null) valB = '';
+
+    if (typeof valA === 'string') valA = valA.toLowerCase();
+    if (typeof valB === 'string') valB = valB.toLowerCase();
+
+    if (valA < valB) return sortDir === 'asc' ? -1 : 1;
+    if (valA > valB) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const totalPages = Math.ceil(sortedObjects.length / pageSize) || 1;
+  const paginatedObjects = sortedObjects.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   // 3-Parallel Worker Pool for High-Speed Multipart Upload
   async function handleFileUpload(files) {
@@ -162,7 +209,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     const { uploadId, objectKey } = initData;
     let completedCount = 0;
 
-    // Parallel upload pool (3 workers in parallel)
     const CONCURRENCY = 3;
     const chunkIndices = Array.from({ length: totalChunks }, (_, idx) => idx);
 
@@ -208,7 +254,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
       });
     }
 
-    // Execute queue in parallel workers
     const queue = [...chunkIndices];
     async function runPoolWorker() {
       while (queue.length > 0) {
@@ -221,7 +266,6 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
 
     await Promise.all(Array.from({ length: CONCURRENCY }, () => runPoolWorker()));
 
-    // Complete session
     setUploadProgress({
       fileName: (objectKey || file.name) + " (Sunucuda Birleştiriliyor...)",
       currentChunk: totalChunks,
@@ -372,6 +416,13 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     if (type === 'audio') return <FileAudio className="w-4.5 h-4.5 text-amber-400" />;
     if (type === 'text' || type === 'application') return <FileText className="w-4.5 h-4.5 text-blue-400" />;
     return <File className="w-4.5 h-4.5 text-slate-400" />;
+  }
+
+  function renderSortIcon(field) {
+    if (sortField !== field) return <ArrowUpDown className="w-3.5 h-3.5 text-slate-600 inline ml-1" />;
+    return sortDir === 'asc' 
+      ? <ArrowUp className="w-3.5 h-3.5 text-blue-400 inline ml-1" />
+      : <ArrowDown className="w-3.5 h-3.5 text-blue-400 inline ml-1" />;
   }
 
   return (
@@ -546,20 +597,31 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                       )}
                     </button>
                   </th>
-                  <th className="px-4 py-3.5">Dosya Yolu & Object Key</th>
-                  <th className="px-4 py-3.5">Boyut</th>
-                  <th className="px-4 py-3.5 font-mono">ETag / Sürüm</th>
-                  <th className="px-4 py-3.5">Kullanıcı</th>
+                  <th onClick={() => handleSort('object_key')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Dosya Yolu & Object Key {renderSortIcon('object_key')}
+                  </th>
+                  <th onClick={() => handleSort('size_bytes')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Boyut {renderSortIcon('size_bytes')}
+                  </th>
+                  <th onClick={() => handleSort('etag')} className="px-4 py-3.5 font-mono cursor-pointer hover:text-white transition select-none">
+                    ETag / Sürüm {renderSortIcon('etag')}
+                  </th>
+                  <th onClick={() => handleSort('user_id')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Kullanıcı {renderSortIcon('user_id')}
+                  </th>
+                  <th onClick={() => handleSort('created_at')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Tarih {renderSortIcon('created_at')}
+                  </th>
                   <th className="px-4 py-3.5 text-right">İşlemler</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
                 {loading ? (
                   <tr>
-                    <td colSpan="6" className="text-center py-12 text-slate-500">Yükleniyor...</td>
+                    <td colSpan="7" className="text-center py-12 text-slate-500">Yükleniyor...</td>
                   </tr>
-                ) : objects.length > 0 ? (
-                  objects.map((obj) => {
+                ) : paginatedObjects.length > 0 ? (
+                  paginatedObjects.map((obj) => {
                     const directUrl = `${API_BASE || window.location.origin}/api/storage/${obj.bucket_name}/${encodeURIComponent(obj.object_key)}`;
                     const isSelected = selectedKeys.includes(obj.object_key);
 
@@ -578,7 +640,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                             <div>
                               <span 
                                 onClick={() => setPreviewObj({ ...obj, directUrl })}
-                                className="font-bold text-white hover:text-blue-400 cursor-pointer block text-sm font-mono truncate max-w-md"
+                                className="font-bold text-white hover:text-blue-400 cursor-pointer block text-sm font-mono truncate max-w-xs sm:max-w-md"
                               >
                                 {obj.object_key}
                               </span>
@@ -593,6 +655,9 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                         </td>
                         <td className="px-4 py-4 text-slate-400 font-mono text-xs">
                           <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded">{obj.user_id || 'user_default'}</span>
+                        </td>
+                        <td className="px-4 py-4 font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                          {new Date(obj.created_at).toLocaleString('tr-TR')}
                         </td>
                         <td className="px-4 py-4 text-right space-x-1.5 whitespace-nowrap">
                           {/* Versions */}
@@ -645,7 +710,7 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                   })
                 ) : (
                   <tr>
-                    <td colSpan="6" className="text-center py-16 text-slate-500">Kayıtlı dosya yok.</td>
+                    <td colSpan="7" className="text-center py-16 text-slate-500">Kayıtlı dosya yok.</td>
                   </tr>
                 )}
               </tbody>
@@ -659,15 +724,21 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider font-bold border-b border-white/10 text-[11px]">
                 <tr>
-                  <th className="px-5 py-3.5">Silinen Dosya Yolu</th>
-                  <th className="px-5 py-3.5">Boyut</th>
-                  <th className="px-5 py-3.5">Kullanıcı</th>
+                  <th onClick={() => handleSort('object_key')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Silinen Dosya Yolu {renderSortIcon('object_key')}
+                  </th>
+                  <th onClick={() => handleSort('size_bytes')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Boyut {renderSortIcon('size_bytes')}
+                  </th>
+                  <th onClick={() => handleSort('user_id')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Kullanıcı {renderSortIcon('user_id')}
+                  </th>
                   <th className="px-5 py-3.5 text-right">İşlemler</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {trashObjects.length > 0 ? (
-                  trashObjects.map((obj) => (
+                {paginatedObjects.length > 0 ? (
+                  paginatedObjects.map((obj) => (
                     <tr key={obj.id} className="hover:bg-slate-900/60">
                       <td className="px-5 py-4 font-mono text-slate-300 font-semibold">{obj.object_key}</td>
                       <td className="px-5 py-4 font-mono text-slate-400">{formatBytes(obj.size_bytes)}</td>
@@ -699,6 +770,48 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
             </table>
           </div>
         )}
+
+        {/* PAGINATION FOOTER BAR */}
+        <div className="p-4 bg-slate-950/80 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-slate-400">
+          <div className="flex items-center space-x-3">
+            <span>Sayfa Başına Göster:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-white text-xs font-mono focus:outline-none focus:border-blue-500"
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+            <span>Toplam <strong className="text-white font-mono">{sortedObjects.length}</strong> kayıttan <strong className="text-white font-mono">{Math.min(sortedObjects.length, (currentPage - 1) * pageSize + 1)}-{Math.min(sortedObjects.length, currentPage * pageSize)}</strong> gösteriliyor</span>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Önceki</span>
+            </button>
+
+            <span className="px-3 py-1.5 font-mono text-xs font-bold text-slate-300 bg-slate-900 border border-white/5 rounded-lg">
+              Sayfa {currentPage} / {totalPages}
+            </span>
+
+            <button
+              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-bold text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition"
+            >
+              <span>Sonraki</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
 
       </div>
 
