@@ -39,15 +39,14 @@ router.get('/stats', async (req, res) => {
   }
 });
 
-// GET /api/stats/daily-transfers - Filterable Daily Transfer Sessions & Metrics
-router.get('/daily-transfers', async (req, res) => {
+// GET /api/stats/daily-transfers & /api/daily-transfers - Filterable Daily Transfer Sessions & Metrics
+const handleDailyTransfers = async (req, res) => {
   try {
     const { search = '', status = 'ALL', date } = req.query;
 
     const dbSessions = await query(`SELECT * FROM TRANSFER_SESSIONS`);
     const memorySessions = Array.from(liveUploadSessions.values());
 
-    // Merge memory live sessions with DB sessions
     const sessionMap = new Map();
 
     dbSessions.forEach(s => {
@@ -135,13 +134,16 @@ router.get('/daily-transfers', async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
 
-// GET /api/stats/live-uploads - Real-Time Live User Upload Monitor Telemetry
-router.get('/live-uploads', (req, res) => {
+router.get('/stats/daily-transfers', handleDailyTransfers);
+router.get('/daily-transfers', handleDailyTransfers);
+
+// GET /api/stats/live-uploads & /api/live-uploads
+const handleLiveUploads = (req, res) => {
   try {
     const sessions = Array.from(liveUploadSessions.values());
-    const activeSessions = sessions.filter(s => s.status === 'YÜKLENİYOR');
+    const activeSessions = sessions.filter(s => s.status === 'YÜKLENİYOR' || s.status === 'IN_PROGRESS');
     
     const totalSpeedBytesPerSec = activeSessions.reduce((acc, curr) => acc + (curr.speedBytesPerSec || 0), 0);
     const activeUsers = [...new Set(activeSessions.map(s => s.userId))];
@@ -158,7 +160,10 @@ router.get('/live-uploads', (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+
+router.get('/stats/live-uploads', handleLiveUploads);
+router.get('/live-uploads', handleLiveUploads);
 
 // GET /api/keys - List API Keys
 router.get('/keys', async (req, res) => {
