@@ -10,10 +10,15 @@ import {
   Zap,
   Activity,
   Layers,
-  Webhook
+  Webhook,
+  Clock,
+  Users,
+  Crown,
+  Code,
+  Eye
 } from 'lucide-react';
 
-export default function Navbar({ activeTab, setActiveTab, stats }) {
+export default function Navbar({ activeTab, setActiveTab, stats, currentUser, users = [], onSwitchUser }) {
   const tabs = [
     { id: 'overview', label: 'Genel Bakış', icon: BarChart3, badge: 'Dashboard' },
     { id: 'buckets', label: 'Bucket Yönetimi', icon: Database, count: stats?.totalBuckets },
@@ -21,6 +26,8 @@ export default function Navbar({ activeTab, setActiveTab, stats }) {
     { id: 'presigned', label: 'İmzalı URL Üretici', icon: Link2, badge: 'HMAC' },
     { id: 'apikeys', label: 'API & SDK Erişim', icon: KeyRound, badge: 'Keys' },
     { id: 'webhooks', label: 'Webhook & Bildirimler', icon: Webhook, badge: 'Events' },
+    { id: 'lifecycle', label: 'Yaşam Döngüsü', icon: Clock, badge: 'Auto' },
+    { id: 'users', label: 'Kullanıcılar & RBAC', icon: Users, badge: 'Security' },
   ];
 
   function formatBytes(bytes, decimals = 1) {
@@ -30,6 +37,12 @@ export default function Navbar({ activeTab, setActiveTab, stats }) {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i];
   }
+
+  const roleColor = currentUser?.role === 'ADMIN' 
+    ? 'text-amber-300 bg-amber-500/10 border-amber-500/30' 
+    : currentUser?.role === 'DEVELOPER'
+    ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/30'
+    : 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30';
 
   return (
     <header className="border-b border-white/[0.08] bg-[#07080d]/85 backdrop-blur-2xl sticky top-0 z-50 transition-all">
@@ -56,9 +69,18 @@ export default function Navbar({ activeTab, setActiveTab, stats }) {
             </div>
           </div>
 
-          {/* Right Status Badges */}
+          {/* Right Status Badges & User Selector */}
           <div className="hidden lg:flex items-center space-x-3.5">
             
+            {/* Active User / Role Pill */}
+            {currentUser && (
+              <div className={`flex items-center space-x-2 border rounded-full px-3.5 py-1.5 text-xs font-semibold ${roleColor}`}>
+                {currentUser.role === 'ADMIN' ? <Crown className="w-3.5 h-3.5" /> : currentUser.role === 'DEVELOPER' ? <Code className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                <span>{currentUser.full_name || currentUser.username}</span>
+                <span className="opacity-60 text-[10px] uppercase">({currentUser.role})</span>
+              </div>
+            )}
+
             {/* Live Engine Status */}
             <div className="flex items-center space-x-2.5 bg-[#0e121e]/90 border border-white/10 rounded-full px-4 py-1.5 text-xs shadow-inner">
               <span className="relative flex h-2.5 w-2.5">

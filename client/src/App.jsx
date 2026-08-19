@@ -6,18 +6,28 @@ import ObjectsTab from './components/ObjectsTab';
 import PresignedTab from './components/PresignedTab';
 import ApiKeysTab from './components/ApiKeysTab';
 import WebhooksTab from './components/WebhooksTab';
+import LifecycleTab from './components/LifecycleTab';
+import UsersTab from './components/UsersTab';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [stats, setStats] = useState(null);
   const [buckets, setBuckets] = useState([]);
   const [selectedBucket, setSelectedBucket] = useState('');
+  const [users, setUsers] = useState([]);
+  const [currentUser, setCurrentUser] = useState({
+    id: 1,
+    username: 'admin',
+    full_name: 'Master Sistem Yöneticisi',
+    role: 'ADMIN'
+  });
 
   const [presignedTarget, setPresignedTarget] = useState({ bucket: '', key: '' });
 
   useEffect(() => {
     fetchStats();
     fetchBuckets();
+    fetchUsers();
   }, []);
 
   async function fetchStats() {
@@ -47,6 +57,21 @@ export default function App() {
     }
   }
 
+  async function fetchUsers() {
+    try {
+      const res = await fetch('/api/users');
+      const data = await res.json();
+      if (data.success && data.users && data.users.length > 0) {
+        setUsers(data.users);
+        if (!currentUser) {
+          setCurrentUser(data.users[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch users:', err);
+    }
+  }
+
   function handleSelectBucketAndNavigate(bucketName) {
     setSelectedBucket(bucketName);
     setActiveTab('objects');
@@ -57,13 +82,20 @@ export default function App() {
     setActiveTab('presigned');
   }
 
+  function handleSwitchUser(user) {
+    setCurrentUser(user);
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100 selection:bg-blue-500 selection:text-white">
       {/* Top Navbar */}
       <Navbar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
-        stats={stats} 
+        stats={stats}
+        currentUser={currentUser}
+        users={users}
+        onSwitchUser={handleSwitchUser}
       />
 
       {/* Main Body */}
@@ -80,6 +112,7 @@ export default function App() {
             buckets={buckets} 
             fetchBuckets={() => { fetchBuckets(); fetchStats(); }} 
             onSelectBucket={handleSelectBucketAndNavigate} 
+            currentUser={currentUser}
           />
         )}
 
@@ -89,6 +122,7 @@ export default function App() {
             selectedBucket={selectedBucket} 
             setSelectedBucket={setSelectedBucket} 
             onGeneratePresigned={handleTriggerPresigned} 
+            currentUser={currentUser}
           />
         )}
 
@@ -106,6 +140,17 @@ export default function App() {
 
         {activeTab === 'webhooks' && (
           <WebhooksTab />
+        )}
+
+        {activeTab === 'lifecycle' && (
+          <LifecycleTab buckets={buckets} />
+        )}
+
+        {activeTab === 'users' && (
+          <UsersTab 
+            currentUser={currentUser} 
+            onSwitchUser={handleSwitchUser} 
+          />
         )}
       </main>
 

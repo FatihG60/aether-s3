@@ -21,7 +21,9 @@ let state = {
   api_keys: [],
   presigned_urls: [],
   activity_logs: [],
-  webhooks: []
+  webhooks: [],
+  lifecycle_rules: [],
+  users: []
 };
 
 // Save DB state to file asynchronously
@@ -48,6 +50,8 @@ function loadState() {
   if (!state.object_versions) state.object_versions = [];
   if (!state.transfer_sessions) state.transfer_sessions = [];
   if (!state.webhooks) state.webhooks = [];
+  if (!state.lifecycle_rules) state.lifecycle_rules = [];
+  if (!state.users) state.users = [];
 
   // Migration for objects schema
   state.objects.forEach(obj => {
@@ -98,7 +102,55 @@ export async function initDatabase() {
     saveState();
   }
 
-  console.log('✅ Custom S3 Storage Engine Database (Daily Transfer Tracking & Persistence Enabled) initialized.');
+  // Seed default RBAC Users if empty
+  if (state.users.length === 0) {
+    state.users.push(
+      {
+        id: 1,
+        username: 'admin',
+        full_name: 'Master Sistem Yöneticisi',
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 2,
+        username: 'developer_101',
+        full_name: 'Ahmet Geliştirici',
+        role: 'DEVELOPER',
+        status: 'ACTIVE',
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 3,
+        username: 'viewer_auditor',
+        full_name: 'Denetçi / Gözlemci',
+        role: 'VIEWER',
+        status: 'ACTIVE',
+        created_at: new Date().toISOString()
+      }
+    );
+    saveState();
+  }
+
+  // Seed default Lifecycle Rule if empty
+  if (state.lifecycle_rules.length === 0) {
+    state.lifecycle_rules.push({
+      id: 1,
+      name: 'Geçici Dosyaları 7 Gün Sonra Çöpe Taşı',
+      bucket_name: 'general-storage',
+      prefix: 'temp/',
+      action: 'EXPIRE_SOFT_DELETE',
+      days_after_creation: 7,
+      is_active: 1,
+      last_run_at: null,
+      affected_objects_count: 0,
+      created_at: new Date().toISOString()
+    });
+    saveState();
+  }
+
+  console.log('✅ Custom S3 Storage Engine Database (Lifecycle Rules & RBAC Enabled) initialized.');
 }
 
 // --- Query methods ---
@@ -168,6 +220,14 @@ export async function query(sql, params = []) {
     return [...state.webhooks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   }
 
+  if (cleanSql.includes('FROM USERS')) {
+    return [...state.users].sort((a, b) => a.id - b.id);
+  }
+
+  if (cleanSql.includes('FROM LIFECYCLE_RULES')) {
+    return [...state.lifecycle_rules].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }
+
   if (cleanSql.includes('FROM ACTIVITY_LOGS')) {
     return [...state.activity_logs].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   }
@@ -177,6 +237,22 @@ export async function query(sql, params = []) {
 
 export async function get(sql, params = []) {
   const cleanSql = sql.trim().toUpperCase();
+
+  if (cleanSql.includes('FROM USERS')) {
+    if (cleanSql.includes('WHERE ID = ?')) {
+      const id = parseInt(params[0], 10);
+      return state.users.find(u => u.id === id) || null;
+    }
+    if (cleanSql.includes('WHERE USERNAME = ?')) {
+      return state.users.find(u => u.username === params[0]) || null;
+    }
+    return state.users[0] || null;
+  }
+
+  if (cleanSql.includes('FROM LIFECYCLE_RULES')) {
+    const id = parseInt(params[0], 10);
+    return state.lifecycle_rules.find(r => r.id === id) || null;
+  }
 
   if (cleanSql.includes('FROM WEBHOOKS')) {
     const id = parseInt(params[0], 10);
@@ -479,6 +555,85 @@ export async function run(sql, params = []) {
     state.webhooks = state.webhooks.filter(w => w.id !== id);
     saveState();
     return { changes: initial - state.webhooks.length };
+  }
+
+  if (cleanSql.startsWith('INSERT INTO USERS')) {
+    const [username, full_name, role, status] = params;
+    const newId = state.users.length > 0 ? Math.max(...state.users.map(u => u.id)) + 1 : 1;
+    state.users.push({
+      id: newId,
+      username,
+      full_name: full_name || username,
+      role: role || 'DEVELOPER',
+      status: status || 'ACTIVE',
+      created_at: new Date().toISOString()
+    });
+    saveState();
+    return { lastID: newId, changes: 1 };
+  }
+
+  if (cleanSql.startsWith('UPDATE USERS')) {
+    const [full_name, role, status, id] = params;
+    const user = state.users.find(u => u.id === parseInt(id, 10));
+    if (user) {
+      if (full_name !== undefined) user.full_name = full_name;
+      if (role !== undefined) user.role = role;
+      if (status !== undefined) user.status = status;
+      saveState();
+      return { changes: 1 };
+    }
+    return { changes: 0 };
+  }
+
+  if (cleanSql.startsWith('DELETE FROM USERS')) {
+    const id = parseInt(params[0], 10);
+    const initial = state.users.length;
+    state.users = state.users.filter(u => u.id !== id);
+    saveState();
+    return { changes: initial - state.users.length };
+  }
+
+  if (cleanSql.startsWith('INSERT INTO LIFECYCLE_RULES')) {
+    const [name, bucket_name, prefix, action, days_after_creation, is_active] = params;
+    const newId = state.lifecycle_rules.length > 0 ? Math.max(...state.lifecycle_rules.map(r => r.id)) + 1 : 1;
+    state.lifecycle_rules.push({
+      id: newId,
+      name: name || 'Lifecycle Rule',
+      bucket_name: bucket_name || '*',
+      prefix: prefix || '',
+      action: action || 'EXPIRE_SOFT_DELETE',
+      days_after_creation: parseInt(days_after_creation, 10) || 7,
+      is_active: is_active === undefined ? 1 : is_active,
+      last_run_at: null,
+      affected_objects_count: 0,
+      created_at: new Date().toISOString()
+    });
+    saveState();
+    return { lastID: newId, changes: 1 };
+  }
+
+  if (cleanSql.startsWith('UPDATE LIFECYCLE_RULES')) {
+    const [name, bucket_name, prefix, action, days_after_creation, is_active, id] = params;
+    const rule = state.lifecycle_rules.find(r => r.id === parseInt(id, 10));
+    if (rule) {
+      if (name !== undefined) rule.name = name;
+      if (bucket_name !== undefined) rule.bucket_name = bucket_name;
+      if (prefix !== undefined) rule.prefix = prefix;
+      if (action !== undefined) rule.action = action;
+      if (days_after_creation !== undefined) rule.days_after_creation = parseInt(days_after_creation, 10);
+      if (is_active !== undefined) rule.is_active = is_active;
+      saveState();
+      return { changes: 1 };
+    }
+    return { changes: 0 };
+  }
+
+  if (cleanSql.startsWith('DELETE FROM LIFECYCLE_RULES')) {
+    const id = parseInt(params[0], 10);
+    const initial = state.lifecycle_rules.length;
+    state.lifecycle_rules = state.lifecycle_rules.filter(r => r.id !== id);
+    saveState();
+    return { changes: initial - state.lifecycle_rules.length };
   }
 
   return { changes: 0 };

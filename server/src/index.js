@@ -12,6 +12,9 @@ import presignedRoutes from './routes/presignedRoutes.js';
 import statsRoutes from './routes/statsRoutes.js';
 import s3StandardRoutes from './routes/s3StandardRoutes.js';
 import webhookRoutes from './routes/webhookRoutes.js';
+import lifecycleRoutes from './routes/lifecycleRoutes.js';
+import userRoutes from './routes/userRoutes.js';
+import { startLifecycleScheduler } from './services/lifecycleEngine.js';
 
 dotenv.config();
 
@@ -62,6 +65,8 @@ app.use('/api', objectRoutes);
 app.use('/api/presigned', presignedRoutes);
 app.use('/api', statsRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/lifecycle', lifecycleRoutes);
+app.use('/api/users', userRoutes);
 
 // AWS S3 Standard REST XML Protocol Router (AWS CLI, Boto3, Cyberduck, Rclone)
 app.use('/', s3StandardRoutes);
@@ -91,6 +96,9 @@ initDatabase().then(() => {
     console.log(`🚀 Custom S3 Storage Engine running on http://localhost:${PORT}`);
     console.log(`📦 AWS S3 Standard REST / XML API active at http://localhost:${PORT}`);
     console.log(`📊 Storage Dashboard API ready at http://localhost:${PORT}/api/stats`);
+    
+    // Start background automated S3 lifecycle rules scheduler
+    startLifecycleScheduler();
   });
 
   server.keepAliveTimeout = 86400000; // 24 Hours
