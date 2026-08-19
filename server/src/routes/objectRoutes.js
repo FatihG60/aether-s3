@@ -753,6 +753,136 @@ router.put('/storage/:bucket/tags/*', async (req, res) => {
   }
 });
 
+// --- S3 BATCH OPERATIONS MOTORU ---
+
+// POST /api/storage/batch/tag - Toplu Etiket Atama
+router.post('/storage/batch/tag', async (req, res) => {
+  try {
+    const { bucket, keys = [], tags = [] } = req.body;
+
+    if (!bucket || !keys || keys.length === 0) {
+      return res.status(400).json({ success: false, error: 'Bucket and keys array are required' });
+    }
+
+    let updatedCount = 0;
+    for (const key of keys) {
+      const object = await get(`SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`, [bucket, key]);
+      if (object) {
+        // Merge or overwrite tags
+        const currentTags = Array.isArray(object.tags) ? [...object.tags] : [];
+        const mergedMap = new Map();
+        currentTags.forEach(t => mergedMap.set(t.key, t.value));
+        tags.forEach(t => mergedMap.set(t.key, t.value));
+        
+        const finalTags = Array.from(mergedMap.entries()).map(([k, v]) => ({ key: k, value: v }));
+        await run(`UPDATE objects SET tags = ? WHERE id = ?`, [finalTags, object.id]);
+        updatedCount++;
+      }
+    }
+
+    await logActivity('BATCH_TAG', bucket, null, `${updatedCount} objects tagged with ${JSON.stringify(tags)}`);
+
+    res.json({
+      success: true,
+      message: `${updatedCount} nesneye toplu etiket başarıyla uygulandı.`,
+      updatedCount
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/storage/batch/move - Toplu Taşıma / Yeniden Adlandırma
+router.post('/storage/batch/move', async (req, res) => {
+  try {
+    const { sourceBucket, targetBucket, keys = [], targetPrefix = '' } = req.body;
+
+    if (!sourceBucket || !targetBucket || !keys || keys.length === 0) {
+      return res.status(400).json({ success: false, error: 'Source bucket, target bucket and keys are required' });
+    }
+
+    const targetDir = getBucketDir(targetBucket);
+    let movedCount = 0;
+
+    for (const key of keys) {
+      const object = await get(`SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`, [sourceBucket, key]);
+      if (object && fs.existsSync(object.file_path)) {
+        // Construct target object key
+        const fileName = path.basename(key);
+        const prefixClean = targetPrefix ? targetPrefix.replace(/^\/+|\/+$/g, '') + '/' : '';
+        const newObjectKey = prefixClean ? `${prefixClean}${fileName}` : key;
+
+        const newFilePath = path.join(targetDir, newObjectKey.replace(/\\/g, '/').replace(/^\/+/, ''));
+        const newParentDir = path.dirname(newFilePath);
+        if (!fs.existsSync(newParentDir)) {
+          fs.mkdirSync(newParentDir, { recursive: true });
+        }
+
+        // Fast zero-reupload move
+        fs.renameSync(object.file_path, newFilePath);
+
+        // Update DB record
+        await run(
+          `UPDATE objects SET bucket_name = ?, object_key = ?, file_path = ?, is_deleted = 0 WHERE id = ?`,
+          [targetBucket, newObjectKey, newFilePath, object.id]
+        );
+
+        movedCount++;
+      }
+    }
+
+    await logActivity('BATCH_MOVE', sourceBucket, null, `${movedCount} objects moved to ${targetBucket}`);
+
+    res.json({
+      success: true,
+      message: `${movedCount} nesne başarıyla ${targetBucket} bucket'ına taşındı.`,
+      movedCount
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/storage/batch/delete - Toplu Silme / Çöpe Taşıma
+router.post('/storage/batch/delete', async (req, res) => {
+  try {
+    const { bucket, keys = [], permanent = false } = req.body;
+
+    if (!bucket || !keys || keys.length === 0) {
+      return res.status(400).json({ success: false, error: 'Bucket and keys are required' });
+    }
+
+    let deletedCount = 0;
+    for (const key of keys) {
+      const object = await get(`SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`, [bucket, key]);
+      if (object) {
+        if (permanent) {
+          deleteObjectFile(object.file_path);
+          await run(`DELETE FROM objects WHERE id = ?`, [object.id]);
+        } else {
+          await run(`UPDATE objects SET is_deleted = 1 WHERE id = ?`, [object.id]);
+        }
+        deletedCount++;
+      }
+    }
+
+    await logActivity(
+      permanent ? 'BATCH_PERMANENT_DELETE' : 'BATCH_SOFT_DELETE',
+      bucket,
+      null,
+      `${deletedCount} objects ${permanent ? 'permanently deleted' : 'moved to trash'}`
+    );
+
+    res.json({
+      success: true,
+      message: `${deletedCount} nesne ${permanent ? 'kalıcı olarak silindi' : 'çöp kutusuna taşındı'}.`,
+      deletedCount
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/storage/:bucket/download-zip - Stream Dynamic ZIP
 router.post('/storage/:bucket/download-zip', async (req, res) => {
   try {

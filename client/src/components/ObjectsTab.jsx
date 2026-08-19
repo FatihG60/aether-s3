@@ -89,11 +89,20 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
   const [newTagValue, setNewTagValue] = useState('');
   const [tagLoading, setTagLoading] = useState(false);
 
+  // S3 Batch Operations State
+  const [batchTagModalOpen, setBatchTagModalOpen] = useState(false);
+  const [batchMoveModalOpen, setBatchMoveModalOpen] = useState(false);
+  const [batchMoveBucket, setBatchMoveBucket] = useState('');
+  const [batchMovePrefix, setBatchMovePrefix] = useState('');
+  const [batchTags, setBatchTags] = useState([{ key: 'env', value: 'production' }]);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchReport, setBatchReport] = useState(null);
+
   // Structured Pathing Options
   const [useStructuredPath, setUseStructuredPath] = useState(true);
   const [currentUserId, setCurrentUserId] = useState('user_101');
 
-  // Multi-select for ZIP download
+  // Multi-select for ZIP download & Batch Operations
   const [selectedKeys, setSelectedKeys] = useState([]);
 
   // Sorting & Pagination State
@@ -544,6 +553,97 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     }
   }
 
+  // --- S3 BATCH OPERATIONS HANDLERS ---
+  async function handleExecuteBatchTag() {
+    if (selectedKeys.length === 0) return;
+    setBatchLoading(true);
+    setBatchReport(null);
+    try {
+      const validTags = batchTags.filter(t => t.key.trim() !== '');
+      const res = await fetch(`${API_BASE}/api/storage/batch/tag`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bucket: selectedBucket,
+          keys: selectedKeys,
+          tags: validTags
+        })
+      });
+      const data = await res.json();
+      setBatchReport(data);
+      if (data.success) {
+        setBatchTagModalOpen(false);
+        fetchObjects();
+      }
+    } catch (err) {
+      setBatchReport({ success: false, error: err.message });
+    } finally {
+      setBatchLoading(false);
+    }
+  }
+
+  async function handleExecuteBatchMove() {
+    if (selectedKeys.length === 0 || !batchMoveBucket) return;
+    setBatchLoading(true);
+    setBatchReport(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/storage/batch/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceBucket: selectedBucket,
+          targetBucket: batchMoveBucket,
+          keys: selectedKeys,
+          targetPrefix: batchMovePrefix
+        })
+      });
+      const data = await res.json();
+      setBatchReport(data);
+      if (data.success) {
+        setBatchMoveModalOpen(false);
+        setSelectedKeys([]);
+        fetchObjects();
+      }
+    } catch (err) {
+      setBatchReport({ success: false, error: err.message });
+    } finally {
+      setBatchLoading(false);
+    }
+  }
+
+  async function handleExecuteBatchDelete(permanent = false) {
+    if (selectedKeys.length === 0) return;
+    const msg = permanent
+      ? `Seçilen ${selectedKeys.length} dosya KALICI OLARAK silinsin mi? Bu işlem geri alınamaz!`
+      : `Seçilen ${selectedKeys.length} dosya Çöp Kutusu'na taşınsın mı?`;
+    if (!window.confirm(msg)) return;
+
+    setBatchLoading(true);
+    setBatchReport(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/storage/batch/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bucket: selectedBucket,
+          keys: selectedKeys,
+          permanent
+        })
+      });
+      const data = await res.json();
+      setBatchReport(data);
+      if (data.success) {
+        setSelectedKeys([]);
+        fetchObjects();
+        fetchTrash();
+      }
+    } catch (err) {
+      setBatchReport({ success: false, error: err.message });
+    } finally {
+      setBatchLoading(false);
+    }
+  }
+
   function toggleSelectKey(key) {
     if (selectedKeys.includes(key)) {
       setSelectedKeys(selectedKeys.filter(k => k !== key));
@@ -822,15 +922,53 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
             </button>
           </div>
 
-          {/* Action Bar for Active Files */}
+          {/* Action Bar for Active Files (S3 Batch Operations) */}
           {viewMode === 'active' && selectedKeys.length > 0 && (
-            <button 
-              onClick={handleDownloadZIP}
-              className="btn-accent py-2 px-4 text-xs font-bold animate-fadeIn bg-gradient-to-r from-emerald-600 to-teal-600"
-            >
-              <Archive className="w-4 h-4" />
-              <span>Seçilenleri ZIP İndir ({selectedKeys.length})</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2 animate-fadeIn">
+              <span className="text-xs font-bold text-indigo-300 bg-indigo-500/15 border border-indigo-500/30 px-3 py-1.5 rounded-xl font-mono flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                <span>{selectedKeys.length} dosya seçildi</span>
+              </span>
+
+              <button 
+                onClick={() => setBatchTagModalOpen(true)}
+                className="btn-subtle text-xs py-1.5 px-3 text-cyan-300 border-cyan-500/30 hover:bg-cyan-500/10 flex items-center gap-1 font-bold"
+              >
+                <Tag className="w-3.5 h-3.5" />
+                <span>Toplu Etiketle</span>
+              </button>
+
+              <button 
+                onClick={() => { setBatchMoveBucket(selectedBucket); setBatchMoveModalOpen(true); }}
+                className="btn-subtle text-xs py-1.5 px-3 text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/10 flex items-center gap-1 font-bold"
+              >
+                <MoveRight className="w-3.5 h-3.5" />
+                <span>Toplu Taşı</span>
+              </button>
+
+              <button 
+                onClick={() => handleExecuteBatchDelete(false)}
+                className="btn-subtle text-xs py-1.5 px-3 text-rose-300 border-rose-500/30 hover:bg-rose-500/10 flex items-center gap-1 font-bold"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Toplu Çöpe At</span>
+              </button>
+
+              <button 
+                onClick={handleDownloadZIP}
+                className="btn-accent py-1.5 px-3 text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 flex items-center gap-1"
+              >
+                <Archive className="w-3.5 h-3.5" />
+                <span>Toplu ZIP İndir</span>
+              </button>
+
+              <button 
+                onClick={() => setSelectedKeys([])}
+                className="text-xs text-slate-400 hover:text-white px-2 underline"
+              >
+                Temizle
+              </button>
+            </div>
           )}
         </div>
 
@@ -1516,6 +1654,142 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                 className="btn-accent text-xs bg-gradient-to-r from-cyan-600 to-blue-600"
               >
                 {tagLoading ? 'Kaydediliyor...' : 'Etiketleri Kaydet'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* S3 Batch Tag Modal */}
+      {batchTagModalOpen && (
+        <div className="modal-backdrop">
+          <div className="glass-panel p-6 w-full max-w-lg border border-cyan-500/40 bg-[#080b13] shadow-2xl relative space-y-5 animate-fadeIn">
+            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-cyan-400">
+                  <Tag className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-base">Toplu Etiket Atama (Batch Tagging)</h3>
+                  <p className="text-xs text-slate-400">{selectedKeys.length} adet seçili nesneye uygulanacak</p>
+                </div>
+              </div>
+              <button onClick={() => setBatchTagModalOpen(false)} className="text-slate-400 hover:text-white p-1 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">Uygulanacak Etiketler</label>
+              {batchTags.map((t, idx) => (
+                <div key={idx} className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Anahtar (Örn: project)"
+                    value={t.key}
+                    onChange={(e) => {
+                      const updated = [...batchTags];
+                      updated[idx].key = e.target.value;
+                      setBatchTags(updated);
+                    }}
+                    className="w-1/2 bg-[#05070d] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Değer (Örn: hermes)"
+                    value={t.value}
+                    onChange={(e) => {
+                      const updated = [...batchTags];
+                      updated[idx].value = e.target.value;
+                      setBatchTags(updated);
+                    }}
+                    className="flex-1 bg-[#05070d] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
+                  />
+                  {batchTags.length > 1 && (
+                    <button onClick={() => setBatchTags(batchTags.filter((_, i) => i !== idx))} className="text-slate-500 hover:text-rose-400 px-1">
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => setBatchTags([...batchTags, { key: '', value: '' }])}
+                className="text-xs text-cyan-400 hover:text-cyan-300 font-bold"
+              >
+                + Bir Etiket Daha Ekle
+              </button>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-2">
+              <button type="button" onClick={() => setBatchTagModalOpen(false)} className="btn-subtle text-xs">İptal</button>
+              <button 
+                type="button" 
+                onClick={handleExecuteBatchTag} 
+                disabled={batchLoading}
+                className="btn-accent text-xs bg-gradient-to-r from-cyan-600 to-blue-600"
+              >
+                {batchLoading ? 'Etiketler Uygulanıyor...' : `Seçilen ${selectedKeys.length} Dosyayı Etiketle`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* S3 Batch Move Modal */}
+      {batchMoveModalOpen && (
+        <div className="modal-backdrop">
+          <div className="glass-panel p-6 w-full max-w-lg border border-indigo-500/40 bg-[#080b13] shadow-2xl relative space-y-5 animate-fadeIn">
+            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/25 text-indigo-400">
+                  <MoveRight className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-base">Toplu Taşıma / Klasöre Aktarma</h3>
+                  <p className="text-xs text-slate-400">{selectedKeys.length} adet seçili nesne taşınacak</p>
+                </div>
+              </div>
+              <button onClick={() => setBatchMoveModalOpen(false)} className="text-slate-400 hover:text-white p-1 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="text-slate-300 font-bold block mb-1.5 uppercase tracking-wider">Hedef Bucket:</label>
+                <select
+                  value={batchMoveBucket}
+                  onChange={(e) => setBatchMoveBucket(e.target.value)}
+                  className="w-full bg-[#05070d] border border-slate-700 rounded-xl p-2.5 text-white font-bold focus:outline-none focus:border-indigo-500"
+                >
+                  {buckets.map(b => (
+                    <option key={b.id} value={b.name}>🪣 {b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-bold block mb-1.5 uppercase tracking-wider">Hedef Klasör / Prefix (Opsiyonel):</label>
+                <input
+                  type="text"
+                  placeholder="Örn: archives/2026/ veya backup/"
+                  value={batchMovePrefix}
+                  onChange={(e) => setBatchMovePrefix(e.target.value)}
+                  className="w-full bg-[#05070d] border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-2">
+              <button type="button" onClick={() => setBatchMoveModalOpen(false)} className="btn-subtle text-xs">İptal</button>
+              <button 
+                type="button" 
+                onClick={handleExecuteBatchMove} 
+                disabled={batchLoading}
+                className="btn-accent text-xs bg-gradient-to-r from-indigo-600 to-purple-600"
+              >
+                {batchLoading ? 'Taşınıyor...' : `Seçilen ${selectedKeys.length} Dosyayı Taşı`}
               </button>
             </div>
           </div>

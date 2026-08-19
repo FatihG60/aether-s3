@@ -15,7 +15,8 @@ import {
   Users,
   Crown,
   Code,
-  Eye
+  Eye,
+  Terminal
 } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, stats, currentUser, users = [], onSwitchUser }) {
@@ -28,6 +29,7 @@ export default function Navbar({ activeTab, setActiveTab, stats, currentUser, us
     { id: 'webhooks', label: 'Webhook & Bildirimler', icon: Webhook, badge: 'Events' },
     { id: 'lifecycle', label: 'Yaşam Döngüsü', icon: Clock, badge: 'Auto' },
     { id: 'users', label: 'Kullanıcılar & RBAC', icon: Users, badge: 'Security' },
+    { id: 'playground', label: 'API Playground', icon: Terminal, badge: 'REST' },
   ];
 
   function formatBytes(bytes, decimals = 1) {

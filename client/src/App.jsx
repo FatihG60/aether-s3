@@ -8,6 +8,7 @@ import ApiKeysTab from './components/ApiKeysTab';
 import WebhooksTab from './components/WebhooksTab';
 import LifecycleTab from './components/LifecycleTab';
 import UsersTab from './components/UsersTab';
+import PlaygroundTab from './components/PlaygroundTab';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -151,6 +152,10 @@ export default function App() {
             currentUser={currentUser} 
             onSwitchUser={handleSwitchUser} 
           />
+        )}
+
+        {activeTab === 'playground' && (
+          <PlaygroundTab buckets={buckets} />
         )}
       </main>
 
