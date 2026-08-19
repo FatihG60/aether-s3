@@ -346,6 +346,98 @@ const handleLiveUploads = (req, res) => {
   }
 };
 
+// GET /api/stats/storage-distribution - Treemap & Extension Distribution + AWS Cost Savings
+router.get('/stats/storage-distribution', async (req, res) => {
+  try {
+    const objects = await query(`SELECT * FROM OBJECTS WHERE is_deleted = 0`);
+    const totalBytes = objects.reduce((acc, curr) => acc + (curr.size_bytes || 0), 0);
+
+    // 1. Extension Breakdown
+    const extMap = {};
+    const colorPalette = [
+      '#6366f1', '#a855f7', '#ec4899', '#3b82f6', 
+      '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', 
+      '#14b8a6', '#f43f5e', '#64748b'
+    ];
+
+    objects.forEach(obj => {
+      const ext = (obj.object_key.split('.').pop() || 'diğer').toLowerCase();
+      const cleanExt = ext.length > 8 ? 'diğer' : `.${ext}`;
+      
+      if (!extMap[cleanExt]) {
+        extMap[cleanExt] = {
+          name: cleanExt,
+          extension: cleanExt,
+          bytes: 0,
+          count: 0
+        };
+      }
+      extMap[cleanExt].bytes += (obj.size_bytes || 0);
+      extMap[cleanExt].count += 1;
+    });
+
+    const extensions = Object.values(extMap)
+      .sort((a, b) => b.bytes - a.bytes)
+      .map((item, index) => ({
+        ...item,
+        mb: parseFloat((item.bytes / (1024 * 1024)).toFixed(2)),
+        gb: parseFloat((item.bytes / (1024 * 1024 * 1024)).toFixed(3)),
+        percentage: totalBytes > 0 ? parseFloat(((item.bytes / totalBytes) * 100).toFixed(1)) : 0,
+        fill: colorPalette[index % colorPalette.length]
+      }));
+
+    // 2. Folder Hierarchy Treemap Breakdown
+    const folderMap = {};
+    objects.forEach(obj => {
+      const parts = obj.object_key.split('/');
+      const folder = parts.length > 1 ? `${parts[0]}/` : '📁 root (kök)';
+      
+      if (!folderMap[folder]) {
+        folderMap[folder] = {
+          name: folder,
+          size: 0,
+          count: 0
+        };
+      }
+      folderMap[folder].size += (obj.size_bytes || 0);
+      folderMap[folder].count += 1;
+    });
+
+    const treemapData = Object.values(folderMap)
+      .sort((a, b) => b.size - a.size)
+      .map((item, idx) => ({
+        name: item.name,
+        size: item.size,
+        mb: parseFloat((item.size / (1024 * 1024)).toFixed(2)),
+        count: item.count,
+        fill: colorPalette[idx % colorPalette.length]
+      }));
+
+    // 3. AWS S3 Cost Savings Estimator
+    const totalGB = totalBytes / (1024 * 1024 * 1024);
+    const awsStorageMonthly = totalGB * 0.023; // $0.023 per GB/mo
+    const awsRequestsMonthly = (objects.length * 0.005) / 1000; // $0.005 per 1k PUT/GET
+    const awsMonthlyCost = Math.max(0.50, awsStorageMonthly + awsRequestsMonthly + 1.20);
+    const awsYearlySavings = awsMonthlyCost * 12;
+
+    res.json({
+      success: true,
+      totalBytes,
+      totalObjects: objects.length,
+      extensions,
+      treemapData,
+      awsCost: {
+        totalGB: parseFloat(totalGB.toFixed(3)),
+        monthlyEstimatedCostUSD: parseFloat(awsMonthlyCost.toFixed(2)),
+        yearlyEstimatedCostUSD: parseFloat(awsYearlySavings.toFixed(2)),
+        savedPercentage: 100
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.get('/stats/live-uploads', handleLiveUploads);
 router.get('/live-uploads', handleLiveUploads);
 
