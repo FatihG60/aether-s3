@@ -650,6 +650,109 @@ router.get('/storage/:bucket/thumbnail/*', async (req, res) => {
   }
 });
 
+// --- IN-BROWSER TEXT & CODE VIEWER ---
+
+// GET /api/storage/:bucket/text-content/* - In-browser read for code & text documents
+router.get('/storage/:bucket/text-content/*', async (req, res) => {
+  try {
+    const bucketName = req.params.bucket;
+    const objectKey = decodeURIComponent(req.params[0]);
+
+    const object = await get(
+      `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
+      [bucketName, objectKey]
+    );
+
+    if (!object || !fs.existsSync(object.file_path)) {
+      return res.status(404).json({ success: false, error: 'Object not found' });
+    }
+
+    const MAX_PREVIEW_BYTES = 2 * 1024 * 1024; // 2 MB preview limit
+    const stat = fs.statSync(object.file_path);
+    const isTruncated = stat.size > MAX_PREVIEW_BYTES;
+    const readBytes = Math.min(stat.size, MAX_PREVIEW_BYTES);
+
+    const buffer = Buffer.alloc(readBytes);
+    const fd = fs.openSync(object.file_path, 'r');
+    fs.readSync(fd, buffer, 0, readBytes, 0);
+    fs.closeSync(fd);
+
+    const content = buffer.toString('utf8');
+    const lines = content.split('\n');
+
+    const ext = path.extname(objectKey).toLowerCase().replace('.', '');
+    const langMap = {
+      js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
+      py: 'python', json: 'json', yml: 'yaml', yaml: 'yaml', md: 'markdown',
+      sql: 'sql', html: 'html', css: 'css', sh: 'shell', bash: 'shell',
+      log: 'text', txt: 'text', env: 'shell', csv: 'csv', xml: 'xml',
+      dockerfile: 'dockerfile', makefile: 'makefile'
+    };
+    const language = langMap[ext] || 'text';
+
+    res.json({
+      success: true,
+      fileName: object.file_name || path.basename(objectKey),
+      objectKey,
+      sizeBytes: stat.size,
+      lineCount: lines.length,
+      language,
+      isTruncated,
+      content
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- OBJECT TAGGING & CUSTOM METADATA ---
+
+// GET /api/storage/:bucket/tags/* - Get object tags
+router.get('/storage/:bucket/tags/*', async (req, res) => {
+  try {
+    const bucketName = req.params.bucket;
+    const objectKey = decodeURIComponent(req.params[0]);
+
+    const object = await get(
+      `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
+      [bucketName, objectKey]
+    );
+
+    if (!object) {
+      return res.status(404).json({ success: false, error: 'Object not found' });
+    }
+
+    res.json({ success: true, tags: object.tags || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/storage/:bucket/tags/* - Update object tags
+router.put('/storage/:bucket/tags/*', async (req, res) => {
+  try {
+    const bucketName = req.params.bucket;
+    const objectKey = decodeURIComponent(req.params[0]);
+    const { tags = [] } = req.body;
+
+    const object = await get(
+      `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
+      [bucketName, objectKey]
+    );
+
+    if (!object) {
+      return res.status(404).json({ success: false, error: 'Object not found' });
+    }
+
+    await run(`UPDATE objects SET tags = ? WHERE id = ?`, [tags, object.id]);
+    await logActivity('UPDATE_TAGS', bucketName, objectKey, `Tags updated: ${JSON.stringify(tags)}`);
+
+    res.json({ success: true, message: 'Tags updated successfully', tags });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/storage/:bucket/download-zip - Stream Dynamic ZIP
 router.post('/storage/:bucket/download-zip', async (req, res) => {
   try {

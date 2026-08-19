@@ -36,6 +36,11 @@ import {
   MoveRight,
   FileArchive,
   ExternalLink,
+  Tag,
+  FileCode,
+  Code2,
+  Zap,
+  Sparkles,
   ChevronRight as ChevronBreadcrumb
 } from 'lucide-react';
 
@@ -71,6 +76,18 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
   const [targetKeyInput, setTargetKeyInput] = useState('');
   const [targetBucketInput, setTargetBucketInput] = useState('');
   const [moveLoading, setMoveLoading] = useState(false);
+
+  // In-Browser Code & Document Viewer Modal State
+  const [viewCodeObj, setViewCodeObj] = useState(null);
+  const [codeData, setCodeData] = useState(null);
+  const [codeLoading, setCodeLoading] = useState(false);
+
+  // Object Tagging Modal State
+  const [tagModalObj, setTagModalObj] = useState(null);
+  const [tagsList, setTagsList] = useState([]);
+  const [newTagKey, setNewTagKey] = useState('');
+  const [newTagValue, setNewTagValue] = useState('');
+  const [tagLoading, setTagLoading] = useState(false);
 
   // Structured Pathing Options
   const [useStructuredPath, setUseStructuredPath] = useState(true);
@@ -460,6 +477,73 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
     }
   }
 
+  async function handleViewCode(obj) {
+    setViewCodeObj(obj);
+    setCodeData(null);
+    setCodeLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/storage/${obj.bucket_name}/text-content/${encodeURIComponent(obj.object_key)}`);
+      const data = await res.json();
+      if (data.success) {
+        setCodeData(data);
+      } else {
+        alert(data.error || 'İçerik okunamadı');
+        setViewCodeObj(null);
+      }
+    } catch (err) {
+      alert('İçerik okuma hatası: ' + err.message);
+      setViewCodeObj(null);
+    } finally {
+      setCodeLoading(false);
+    }
+  }
+
+  function handleOpenTagModal(obj) {
+    setTagModalObj(obj);
+    setTagsList(Array.isArray(obj.tags) ? [...obj.tags] : []);
+    setNewTagKey('');
+    setNewTagValue('');
+  }
+
+  function handleAddTag() {
+    if (!newTagKey.trim()) return;
+    const exists = tagsList.some(t => t.key.toLowerCase() === newTagKey.trim().toLowerCase());
+    if (exists) {
+      alert('Bu anahtar zaten eklenmiş.');
+      return;
+    }
+    setTagsList([...tagsList, { key: newTagKey.trim(), value: newTagValue.trim() }]);
+    setNewTagKey('');
+    setNewTagValue('');
+  }
+
+  function handleRemoveTag(idx) {
+    setTagsList(tagsList.filter((_, i) => i !== idx));
+  }
+
+  async function handleSaveTags() {
+    if (!tagModalObj) return;
+    setTagLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/storage/${tagModalObj.bucket_name}/tags/${encodeURIComponent(tagModalObj.object_key)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: tagsList })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTagModalObj(null);
+        fetchObjects();
+      } else {
+        alert(data.error);
+      }
+    } catch (err) {
+      alert('Etiket kaydetme hatası: ' + err.message);
+    } finally {
+      setTagLoading(false);
+    }
+  }
+
   function toggleSelectKey(key) {
     if (selectedKeys.includes(key)) {
       setSelectedKeys(selectedKeys.filter(k => k !== key));
@@ -844,14 +928,32 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                             <div className="p-1 rounded-xl bg-[#090d18] border border-white/5 shrink-0 flex items-center justify-center">
                               {getFileIcon(obj.content_type, obj.object_key, obj.bucket_name)}
                             </div>
-                            <div>
-                              <span 
-                                onClick={() => setPreviewObj({ ...obj, directUrl })}
-                                className="font-bold text-white hover:text-indigo-400 cursor-pointer block text-sm font-mono truncate max-w-xs sm:max-w-md"
-                              >
-                                {folderView && currentPrefix ? obj.object_key.slice(currentPrefix.length) : obj.object_key}
-                              </span>
-                              <span className="text-[11px] text-slate-400 font-sans">{obj.file_name}</span>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span 
+                                  onClick={() => setPreviewObj({ ...obj, directUrl })}
+                                  className="font-bold text-white hover:text-indigo-400 cursor-pointer block text-sm font-mono truncate max-w-xs sm:max-w-md"
+                                >
+                                  {folderView && currentPrefix ? obj.object_key.slice(currentPrefix.length) : obj.object_key}
+                                </span>
+                                {obj.content_type && (obj.content_type.startsWith('text/') || obj.content_type.includes('json') || obj.content_type.includes('javascript') || obj.content_type.includes('csv') || obj.content_type.includes('xml')) && (
+                                  <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.2 rounded font-mono font-bold" title="Ağ üzerinden Gzip/Brotli ile %70 sıkıştırılarak aktarılır">
+                                    ⚡ Gzip
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-[11px] text-slate-400 font-sans">{obj.file_name}</span>
+                                {obj.tags && obj.tags.length > 0 && (
+                                  obj.tags.map((t, idx) => (
+                                    <span key={idx} className="bg-indigo-950/60 text-indigo-300 border border-indigo-500/30 text-[10px] px-2 py-0.2 rounded-md font-mono flex items-center gap-1">
+                                      <Tag className="w-2.5 h-2.5 text-indigo-400" />
+                                      <span>{t.key}: <strong>{t.value}</strong></span>
+                                    </span>
+                                  ))
+                                )}
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -867,6 +969,26 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
                           {new Date(obj.created_at).toLocaleString('tr-TR')}
                         </td>
                         <td className="px-4 py-4 text-right space-x-1.5 whitespace-nowrap">
+                          {/* Code & Document In-Browser Viewer */}
+                          {(obj.content_type?.startsWith('text/') || obj.content_type?.includes('json') || obj.content_type?.includes('javascript') || obj.content_type?.includes('xml') || obj.object_key.match(/\.(txt|json|js|jsx|ts|tsx|py|sql|html|css|sh|md|csv|log|env|yml|yaml|xml)$/i)) && (
+                            <button 
+                              onClick={() => handleViewCode(obj)}
+                              className="btn-subtle p-2 text-xs text-indigo-400 hover:text-indigo-300"
+                              title="Tarayıcıda Kodu / Metni Oku"
+                            >
+                              <FileCode className="w-4 h-4" />
+                            </button>
+                          )}
+
+                          {/* Tag Management */}
+                          <button 
+                            onClick={() => handleOpenTagModal(obj)}
+                            className="btn-subtle p-2 text-xs text-cyan-400 hover:text-cyan-300"
+                            title="Etiketleri Yönet (Tagging)"
+                          >
+                            <Tag className="w-4 h-4" />
+                          </button>
+
                           {isZip && (
                             <button 
                               onClick={() => handleInspectZip(obj)}
@@ -1220,6 +1342,181 @@ export default function ObjectsTab({ buckets, selectedBucket, setSelectedBucket,
               ) : (
                 <p className="text-slate-500 text-xs py-6 text-center">Bu nesne için henüz eski sürüm bulunmuyor.</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-Browser Code & Document Viewer Modal */}
+      {viewCodeObj && (
+        <div className="modal-backdrop">
+          <div className="glass-panel p-6 w-full max-w-5xl border border-indigo-500/40 bg-[#080b13] shadow-2xl relative flex flex-col max-h-[90vh] animate-fadeIn">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-white/[0.08]">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/25 text-indigo-400">
+                  <FileCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2.5">
+                    <h3 className="font-extrabold text-white text-base font-mono truncate max-w-md">
+                      {codeData?.fileName || viewCodeObj.object_key}
+                    </h3>
+                    {codeData?.language && (
+                      <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-md font-mono uppercase font-bold">
+                        {codeData.language}
+                      </span>
+                    )}
+                    {codeData && (
+                      <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-md font-mono">
+                        ⚡ Gzip / Brotli Aktif
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    {codeData ? `${codeData.lineCount} satır • ${formatBytes(codeData.sizeBytes)}` : 'Yükleniyor...'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                {codeData?.content && (
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(codeData.content);
+                      alert('İçerik panoya kopyalandı!');
+                    }}
+                    className="btn-subtle text-xs flex items-center gap-1.5 py-1.5 px-3 text-indigo-300"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Kopyala</span>
+                  </button>
+                )}
+                <button 
+                  onClick={() => { setViewCodeObj(null); setCodeData(null); }} 
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.05]"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Code Body */}
+            <div className="flex-1 overflow-auto my-4 bg-[#05070c] border border-white/[0.08] rounded-xl p-4 font-mono text-xs text-slate-200">
+              {codeLoading ? (
+                <div className="py-20 text-center text-slate-500 flex flex-col items-center justify-center space-y-2">
+                  <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                  <span>İçerik okunuyor...</span>
+                </div>
+              ) : codeData?.content ? (
+                <pre className="overflow-x-auto leading-relaxed">
+                  {codeData.content.split('\n').map((line, idx) => (
+                    <div key={idx} className="flex hover:bg-white/[0.03] px-1 rounded">
+                      <span className="select-none text-slate-600 text-right pr-4 w-12 shrink-0">{idx + 1}</span>
+                      <span className="whitespace-pre">{line || ' '}</span>
+                    </div>
+                  ))}
+                </pre>
+              ) : (
+                <p className="text-slate-500 py-10 text-center">İçerik boş veya okunamadı.</p>
+              )}
+            </div>
+
+            {codeData?.isTruncated && (
+              <p className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-lg">
+                ⚠️ Dosya 2 MB'tan büyük olduğu için tarayıcıda ilk 2 MB'lık kısmı gösterilmektedir.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Object Tagging Modal */}
+      {tagModalObj && (
+        <div className="modal-backdrop">
+          <div className="glass-panel p-6 w-full max-w-lg border border-cyan-500/40 bg-[#080b13] shadow-2xl relative space-y-5 animate-fadeIn">
+            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/25 text-cyan-400">
+                  <Tag className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-base">Nesne Etiketleri (Object Tagging)</h3>
+                  <p className="text-xs text-slate-400 font-mono truncate max-w-xs">{tagModalObj.object_key}</p>
+                </div>
+              </div>
+              <button onClick={() => setTagModalObj(null)} className="text-slate-400 hover:text-white p-1 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Current Tags List */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">Mevcut Etiketler</label>
+              <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                {tagsList.length > 0 ? (
+                  tagsList.map((t, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-[#05070d] border border-white/[0.06] text-xs font-mono">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-indigo-400 font-bold">{t.key}:</span>
+                        <span className="text-slate-200">{t.value}</span>
+                      </div>
+                      <button 
+                        onClick={() => handleRemoveTag(idx)} 
+                        className="text-rose-400 hover:text-rose-300 p-1 rounded hover:bg-rose-500/10"
+                        title="Etiketi Kaldır"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-500 py-3 text-center bg-[#05070d] rounded-xl border border-white/[0.04]">
+                    Bu nesneye henüz etiket atanmamış.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Add Tag Form */}
+            <div className="p-4 rounded-xl bg-[#05070d] border border-white/[0.08] space-y-3">
+              <span className="text-xs font-bold text-slate-300 block">Yeni Etiket Ekle</span>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  placeholder="Anahtar (Örn: env)"
+                  value={newTagKey}
+                  onChange={(e) => setNewTagKey(e.target.value)}
+                  className="bg-[#090d18] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
+                />
+                <input
+                  type="text"
+                  placeholder="Değer (Örn: prod)"
+                  value={newTagValue}
+                  onChange={(e) => setNewTagValue(e.target.value)}
+                  className="bg-[#090d18] border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleAddTag}
+                className="w-full btn-subtle text-xs text-cyan-300 border-cyan-500/30 hover:bg-cyan-500/10 py-2 font-bold"
+              >
+                + Listeye Ekle
+              </button>
+            </div>
+
+            {/* Save Action */}
+            <div className="flex justify-end space-x-3 pt-2">
+              <button type="button" onClick={() => setTagModalObj(null)} className="btn-subtle text-xs">İptal</button>
+              <button 
+                type="button" 
+                onClick={handleSaveTags} 
+                disabled={tagLoading}
+                className="btn-accent text-xs bg-gradient-to-r from-cyan-600 to-blue-600"
+              >
+                {tagLoading ? 'Kaydediliyor...' : 'Etiketleri Kaydet'}
+              </button>
             </div>
           </div>
         </div>

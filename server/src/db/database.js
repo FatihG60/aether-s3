@@ -59,6 +59,7 @@ function loadState() {
     if (obj.is_latest === undefined) obj.is_latest = 1;
     if (obj.is_deleted === undefined) obj.is_deleted = 0;
     if (!obj.version_id) obj.version_id = 'v1';
+    if (!obj.tags) obj.tags = [];
   });
 
   // Migration for transfer_sessions schema
@@ -476,6 +477,18 @@ export async function run(sql, params = []) {
       obj.is_public = is_public;
       obj.file_path = file_path;
       obj.version_id = version_id || `v${state.object_versions.filter(v => v.object_key === obj.object_key).length + 1}`;
+      obj.updated_at = new Date().toISOString();
+      saveState();
+      return { changes: 1 };
+    }
+    return { changes: 0 };
+  }
+
+  if (cleanSql.startsWith('UPDATE OBJECTS SET TAGS')) {
+    const [tags, id] = params;
+    const obj = state.objects.find(o => o.id === parseInt(id, 10));
+    if (obj) {
+      obj.tags = Array.isArray(tags) ? tags : typeof tags === 'string' ? JSON.parse(tags || '[]') : [];
       obj.updated_at = new Date().toISOString();
       saveState();
       return { changes: 1 };

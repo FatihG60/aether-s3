@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import zlib from 'zlib';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -80,6 +81,17 @@ export function streamPartialFile(req, res, filePath, contentType) {
   const stat = fs.statSync(filePath);
   const fileSize = stat.size;
   const range = req.headers.range;
+  const acceptEncoding = req.headers['accept-encoding'] || '';
+
+  // Check if content is compressible text/code/json/csv
+  const isCompressible = contentType && (
+    contentType.startsWith('text/') ||
+    contentType.includes('json') ||
+    contentType.includes('javascript') ||
+    contentType.includes('xml') ||
+    contentType.includes('csv') ||
+    contentType.includes('yaml')
+  );
 
   if (range) {
     const parts = range.replace(/bytes=/, "").split("-");
@@ -102,6 +114,30 @@ export function streamPartialFile(req, res, filePath, contentType) {
 
     res.writeHead(206, head);
     file.pipe(res);
+  } else if (isCompressible && acceptEncoding.includes('gzip') && fileSize > 512) {
+    // Transparent Gzip Compression
+    const head = {
+      'Content-Type': contentType,
+      'Content-Encoding': 'gzip',
+      'Vary': 'Accept-Encoding',
+      'Accept-Ranges': 'none'
+    };
+    res.writeHead(200, head);
+    const rawStream = fs.createReadStream(filePath);
+    const gzip = zlib.createGzip({ level: 6 });
+    rawStream.pipe(gzip).pipe(res);
+  } else if (isCompressible && acceptEncoding.includes('br') && fileSize > 512) {
+    // Transparent Brotli Compression
+    const head = {
+      'Content-Type': contentType,
+      'Content-Encoding': 'br',
+      'Vary': 'Accept-Encoding',
+      'Accept-Ranges': 'none'
+    };
+    res.writeHead(200, head);
+    const rawStream = fs.createReadStream(filePath);
+    const brotli = zlib.createBrotliCompress();
+    rawStream.pipe(brotli).pipe(res);
   } else {
     const head = {
       'Content-Length': fileSize,
