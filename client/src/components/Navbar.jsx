@@ -46,7 +46,7 @@ export default function Navbar({ activeTab, setActiveTab, stats, currentUser, us
 
   return (
     <header className="border-b border-white/[0.08] bg-[#07080d]/85 backdrop-blur-2xl sticky top-0 z-50 transition-all">
-      <div className="max-w-[1720px] w-full mx-auto px-4 sm:px-6 lg:px-10">
+      <div className="w-full px-4 sm:px-8 xl:px-12">
         <div className="flex items-center justify-between h-20">
           
           {/* Logo & Brand Identity */}
