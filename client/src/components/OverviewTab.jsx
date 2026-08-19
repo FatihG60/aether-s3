@@ -403,151 +403,91 @@ export default function OverviewTab({ stats, onNavigate }) {
 
       </div>
 
-      {/* 🗺️ DEPOLAMA ISI HARİTASI (TREEMAP), UZANTI DAĞILIMI & AWS MALİYET TASARRUFU */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Left (8 cols): Storage Treemap & Extension Heatmap */}
-        <div className="lg:col-span-8 glass-panel p-6 space-y-5 border border-indigo-500/20 bg-gradient-to-br from-[#0c0f18] via-[#101422] to-[#141226]">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/[0.08]">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-                <LayoutGrid className="w-5 h-5" />
-              </div>
-              <div>
-                <h2 className="font-extrabold text-lg text-white tracking-tight flex items-center gap-2">
-                  <span>Depolama Isı Haritası & Klasör Dağılımı (Treemap)</span>
-                  <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
-                    CANLI KAPASİTE
-                  </span>
-                </h2>
-                <p className="text-xs text-slate-400">Hangi klasörlerin ve dosya uzantılarının diski ne oranda doldurduğunun görsel ısı haritası</p>
-              </div>
+      {/* 🗺️ DEPOLAMA ISI HARİTASI (TREEMAP) & UZANTI DAĞILIMI */}
+      <div className="glass-panel p-8 space-y-6 border border-indigo-500/20 bg-gradient-to-br from-[#0c0f18] via-[#101422] to-[#141226]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/[0.08]">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-inner">
+              <LayoutGrid className="w-5 h-5" />
             </div>
-            
-            <div className="text-right font-mono text-xs text-slate-400">
-              Toplam Boyut: <strong className="text-white font-bold">{formatBytes(distributionData.totalBytes)}</strong>
+            <div>
+              <h2 className="font-extrabold text-xl text-white tracking-tight flex items-center gap-2.5">
+                <span>Depolama Isı Haritası & Klasör Dağılımı (Treemap)</span>
+                <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-full font-mono font-bold">
+                  CANLI KAPASİTE
+                </span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">Hangi klasörlerin ve dosya uzantılarının diski ne oranda doldurduğunun görsel ısı haritası</p>
             </div>
           </div>
-
-          {/* Visual Heatmap / Treemap Grid */}
-          <div className="space-y-2">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Klasör Hiyerarşisi Isı Haritası (Folder Allocation)</span>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {distributionData.treemapData.length > 0 ? (
-                distributionData.treemapData.map((f, idx) => (
-                  <div 
-                    key={idx} 
-                    className="p-4 rounded-2xl border transition-all duration-200 hover:scale-[1.02] flex flex-col justify-between"
-                    style={{ 
-                      backgroundColor: 'rgba(9, 13, 24, 0.85)',
-                      borderColor: f.fill ? `${f.fill}40` : 'rgba(99, 102, 241, 0.3)',
-                      boxShadow: `0 4px 20px ${f.fill}15`
-                    }}
-                  >
-                    <div>
-                      <span className="text-xs font-bold font-mono text-white block truncate mb-1" title={f.name}>
-                        {f.name}
-                      </span>
-                      <span className="text-lg font-extrabold font-mono" style={{ color: f.fill }}>
-                        {formatBytes(f.size)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-white/[0.04] mt-2 font-mono">
-                      <span>{f.count} nesne</span>
-                      <span>%{distributionData.totalBytes > 0 ? ((f.size / distributionData.totalBytes) * 100).toFixed(1) : 0}</span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="col-span-full py-8 text-center text-slate-500 text-xs">
-                  Henüz analiz edilecek dosya bulunmuyor.
-                </div>
-              )}
-            </div>
+          
+          <div className="bg-[#090d18] border border-white/10 rounded-xl px-4 py-2 text-right font-mono text-xs text-slate-300 shadow-inner">
+            Toplam Depolama: <strong className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-purple-300 text-sm font-bold">{formatBytes(distributionData.totalBytes)}</strong>
           </div>
-
-          {/* Extension Breakdown Progress Bars */}
-          <div className="space-y-3 pt-2">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Dosya Uzantısı & Format Dağılımı (.mp4, .zip, .png, .json, .log)</span>
-            <div className="space-y-2">
-              {distributionData.extensions.map((ext, idx) => (
-                <div key={idx} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="font-bold text-white flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: ext.fill }}></span>
-                      <span>{ext.name}</span>
-                      <span className="text-slate-500 text-[11px] font-sans">({ext.count} dosya)</span>
-                    </span>
-                    <span className="text-slate-300 font-bold">
-                      {formatBytes(ext.bytes)} <span className="text-indigo-400 ml-1">%{ext.percentage}</span>
-                    </span>
-                  </div>
-                  <div className="w-full h-2 bg-[#05070d] rounded-full overflow-hidden border border-white/5">
-                    <div 
-                      className="h-full rounded-full transition-all duration-300"
-                      style={{ width: `${ext.percentage}%`, backgroundColor: ext.fill }}
-                    ></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
         </div>
 
-        {/* Right (4 cols): AWS S3 vs AETHER S3 Cost Savings Card */}
-        <div className="lg:col-span-4 glass-panel p-6 space-y-5 border border-emerald-500/30 bg-gradient-to-br from-[#091512] via-[#0b1a19] to-[#0c101d] flex flex-col justify-between">
-          
-          <div className="space-y-4">
-            <div className="flex items-center space-x-3 pb-3 border-b border-emerald-500/20">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
-                <DollarSign className="w-5 h-5" />
+        {/* Visual Heatmap / Treemap Grid */}
+        <div className="space-y-3">
+          <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block">Klasör Hiyerarşisi Isı Haritası (Folder Allocation)</span>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5">
+            {distributionData.treemapData.length > 0 ? (
+              distributionData.treemapData.map((f, idx) => (
+                <div 
+                  key={idx} 
+                  className="p-4.5 rounded-2xl border transition-all duration-200 hover:scale-[1.02] flex flex-col justify-between"
+                  style={{ 
+                    backgroundColor: 'rgba(9, 13, 24, 0.85)',
+                    borderColor: f.fill ? `${f.fill}40` : 'rgba(99, 102, 241, 0.3)',
+                    boxShadow: `0 4px 20px ${f.fill}15`
+                  }}
+                >
+                  <div>
+                    <span className="text-xs font-bold font-mono text-white block truncate mb-1" title={f.name}>
+                      {f.name}
+                    </span>
+                    <span className="text-xl font-extrabold font-mono" style={{ color: f.fill }}>
+                      {formatBytes(f.size)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2.5 border-t border-white/[0.06] mt-3 font-mono">
+                    <span>{f.count} nesne</span>
+                    <span className="font-bold text-slate-300">%{distributionData.totalBytes > 0 ? ((f.size / distributionData.totalBytes) * 100).toFixed(1) : 0}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="col-span-full py-10 text-center text-slate-500 text-xs">
+                Henüz analiz edilecek dosya bulunmuyor.
               </div>
-              <div>
-                <h3 className="font-extrabold text-white text-base tracking-tight">AWS S3 Maliyet Tasarrufu</h3>
-                <p className="text-xs text-emerald-400/80 font-medium">Bulut Maliyet & ROI Analizi</p>
-              </div>
-            </div>
-
-            {/* Savings Big Hero */}
-            <div className="p-5 rounded-2xl bg-[#040d0a]/90 border border-emerald-500/30 text-center space-y-1">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Aylık Tahmini Tasarrufunuz</span>
-              <div className="text-4xl font-extrabold font-mono text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400">
-                ${distributionData.awsCost.monthlyEstimatedCostUSD} / ay
-              </div>
-              <span className="text-xs text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full inline-block mt-2 font-mono">
-                %100 Sıfır Bulut Faturası
-              </span>
-            </div>
-
-            {/* Metrics Breakdown */}
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between p-3 rounded-xl bg-[#050e0c] border border-white/[0.04]">
-                <span className="text-slate-400">Yıllık Toplam Tasarruf:</span>
-                <strong className="text-emerald-300 font-mono text-sm">${distributionData.awsCost.yearlyEstimatedCostUSD} / yıl</strong>
-              </div>
-
-              <div className="flex items-center justify-between p-3 rounded-xl bg-[#050e0c] border border-white/[0.04]">
-                <span className="text-slate-400">AWS Standard S3 Fiyatı:</span>
-                <span className="text-slate-300 font-mono">$0.023 / GB/ay</span>
-              </div>
-
-              <div className="flex items-center justify-between p-3 rounded-xl bg-[#050e0c] border border-white/[0.04]">
-                <span className="text-slate-400">AWS Data Egress Ücreti:</span>
-                <span className="text-slate-300 font-mono">$0.090 / GB</span>
-              </div>
-
-              <div className="flex items-center justify-between p-3 rounded-xl bg-[#050e0c] border border-white/[0.04]">
-                <span className="text-slate-400">AETHER S3 Maliyeti:</span>
-                <strong className="text-emerald-400 font-mono font-bold">$0.00 (Tamamen Ücretsiz)</strong>
-              </div>
-            </div>
+            )}
           </div>
+        </div>
 
-          <div className="p-3.5 rounded-xl bg-emerald-950/40 border border-emerald-500/20 text-[11px] text-emerald-300/90 leading-relaxed">
-            💡 Kendi yerel veya sunucu diskinizde barındırarak hiçbir veri çıkış (egress) veya depolama ücreti ödemeden %100 gizlilik ve sınırsız bant genişliği kazanırsınız.
+        {/* Extension Breakdown Progress Bars */}
+        <div className="space-y-3 pt-2">
+          <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block">Dosya Uzantısı & Format Dağılımı (.mp4, .zip, .png, .json, .log)</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {distributionData.extensions.map((ext, idx) => (
+              <div key={idx} className="p-3 rounded-xl bg-[#090d18] border border-white/[0.04] space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="font-bold text-white flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: ext.fill }}></span>
+                    <span>{ext.name}</span>
+                    <span className="text-slate-500 text-[11px] font-sans">({ext.count} dosya)</span>
+                  </span>
+                  <span className="text-slate-300 font-bold">
+                    {formatBytes(ext.bytes)} <span className="text-indigo-400 ml-1.5 font-mono">%{ext.percentage}</span>
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-[#05070d] rounded-full overflow-hidden border border-white/5">
+                  <div 
+                    className="h-full rounded-full transition-all duration-300"
+                    style={{ width: `${ext.percentage}%`, backgroundColor: ext.fill }}
+                  ></div>
+                </div>
+              </div>
+            ))}
           </div>
-
         </div>
 
       </div>
