@@ -4,7 +4,7 @@ import {
   Database, 
   Files, 
   Activity, 
-  PieChart, 
+  PieChart as PieChartIcon, 
   PlusCircle, 
   Upload, 
   FileImage,
@@ -29,8 +29,25 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  TrendingUp,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  BarChart3,
+  Network
 } from 'lucide-react';
+import { 
+  AreaChart, 
+  Area, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  Legend
+} from 'recharts';
 
 const API_BASE = typeof window !== 'undefined' && window.location.port === '3000' 
   ? 'http://localhost:5000' 
@@ -46,6 +63,15 @@ export default function OverviewTab({ stats, onNavigate }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
+  // Live Bandwidth & Historical Analytics State
+  const [analyticsData, setAnalyticsData] = useState({
+    liveTimeline: [],
+    last7Days: [],
+    bucketDistribution: [],
+    peakIngressMB: 0,
+    peakEgressMB: 0
+  });
+
   const [dailyData, setDailyData] = useState({
     metrics: {
       targetDate: new Date().toISOString().split('T')[0],
@@ -59,16 +85,38 @@ export default function OverviewTab({ stats, onNavigate }) {
     sessions: []
   });
 
-  // Auto-poll daily transfers and live stats every 1 second
+  // Auto-poll daily transfers and bandwidth metrics every 1 second
   useEffect(() => {
     fetchDailyTransfers();
-    const interval = setInterval(fetchDailyTransfers, 1000);
+    fetchBandwidthHistory();
+    const interval = setInterval(() => {
+      fetchDailyTransfers();
+      fetchBandwidthHistory();
+    }, 1000);
     return () => clearInterval(interval);
   }, [transferSearch, statusFilter]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [transferSearch, statusFilter, pageSize, sortField, sortDir]);
+
+  async function fetchBandwidthHistory() {
+    try {
+      const res = await fetch(`${API_BASE}/api/stats/bandwidth-history`);
+      const data = await res.json();
+      if (data.success) {
+        setAnalyticsData({
+          liveTimeline: data.liveTimeline || [],
+          last7Days: data.last7Days || [],
+          bucketDistribution: data.bucketDistribution || [],
+          peakIngressMB: data.peakIngressMB || 0,
+          peakEgressMB: data.peakEgressMB || 0
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch bandwidth history:', err);
+    }
+  }
 
   async function fetchDailyTransfers() {
     try {
@@ -147,6 +195,9 @@ export default function OverviewTab({ stats, onNavigate }) {
     ? Math.min(100, Math.round((stats.totalBytesUsed / stats.totalQuotaBytes) * 100))
     : 0;
 
+  // Current real-time rates
+  const currentTimelinePoint = analyticsData.liveTimeline[analyticsData.liveTimeline.length - 1] || { ingressMB: 0, egressMB: 0 };
+
   return (
     <div className="space-y-8 animate-fadeIn">
       
@@ -165,7 +216,7 @@ export default function OverviewTab({ stats, onNavigate }) {
               Özel S3 Storage Kontrol Paneli
             </h1>
             <p className="text-slate-400 text-sm max-w-2xl leading-relaxed">
-              AWS S3 standartlarında nesne depolama, Günlük Transfer Takibi ve Sayfalamalı/Sıralamalı Arama Konsolu.
+              Canlı Ağ Bant Genişliği Grafikleri, Günlük Transfer Takibi ve Sayfalamalı/Sıralamalı Arama Konsolu.
             </p>
           </div>
 
@@ -180,6 +231,147 @@ export default function OverviewTab({ stats, onNavigate }) {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* 📈 REAL-TIME NETWORK BANDWIDTH & 7-DAY STORAGE FLOW CHARTS */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* Chart 1: Real-Time Live Bandwidth (Ingress / Egress) */}
+        <div className="lg:col-span-2 glass-panel p-6 space-y-4 border border-indigo-500/20 bg-gradient-to-br from-[#0c0f18] via-[#101422] to-[#141226]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/[0.08]">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-inner">
+                <Network className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="font-extrabold text-lg text-white tracking-tight flex items-center gap-2">
+                  <span>Canlı Ağ Bant Genişliği (Real-Time Throughput)</span>
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-400">Son 60 saniyelik anlık Ingress (Giriş) ve Egress (Çıkış) MB/s hızı</p>
+              </div>
+            </div>
+
+            {/* Live Ingress & Egress Speed Badges */}
+            <div className="flex items-center space-x-3">
+              <div className="bg-[#070912] border border-indigo-500/30 rounded-xl px-3 py-1.5 text-xs flex items-center space-x-2">
+                <ArrowDownCircle className="w-4 h-4 text-indigo-400 animate-pulse" />
+                <span className="text-slate-400">Giriş: <strong className="text-indigo-300 font-mono">{currentTimelinePoint.ingressMB} MB/s</strong></span>
+              </div>
+
+              <div className="bg-[#070912] border border-emerald-500/30 rounded-xl px-3 py-1.5 text-xs flex items-center space-x-2">
+                <ArrowUpCircle className="w-4 h-4 text-emerald-400 animate-pulse" />
+                <span className="text-slate-400">Çıkış: <strong className="text-emerald-300 font-mono">{currentTimelinePoint.egressMB} MB/s</strong></span>
+              </div>
+            </div>
+          </div>
+
+          {/* Area Chart Component */}
+          <div className="h-64 w-full pt-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={analyticsData.liveTimeline} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="ingressGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.5}/>
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0}/>
+                  </linearGradient>
+                  <linearGradient id="egressGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.5}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis 
+                  dataKey="time" 
+                  stroke="#64748b" 
+                  fontSize={10} 
+                  tickLine={false}
+                  interval={10}
+                />
+                <YAxis 
+                  stroke="#64748b" 
+                  fontSize={10} 
+                  tickLine={false} 
+                  unit=" MB/s"
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#090d18', 
+                    borderColor: 'rgba(255,255,255,0.1)', 
+                    borderRadius: '12px',
+                    fontSize: '12px',
+                    boxShadow: '0 10px 25px rgba(0,0,0,0.5)'
+                  }}
+                  itemStyle={{ color: '#f1f5f9' }}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="ingressMB" 
+                  name="Giriş (Upload)" 
+                  stroke="#6366f1" 
+                  strokeWidth={2}
+                  fillOpacity={1} 
+                  fill="url(#ingressGradient)" 
+                  isAnimationActive={false}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="egressMB" 
+                  name="Çıkış (Download)" 
+                  stroke="#10b981" 
+                  strokeWidth={2}
+                  fillOpacity={1} 
+                  fill="url(#egressGradient)" 
+                  isAnimationActive={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Chart 2: 7-Day Storage Growth & Daily Data Flow */}
+        <div className="glass-panel p-6 space-y-4 border border-purple-500/20 bg-gradient-to-br from-[#0c0f18] via-[#101422] to-[#17112c]">
+          <div className="flex items-center justify-between pb-4 border-b border-white/[0.08]">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                <BarChart3 className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="font-extrabold text-lg text-white tracking-tight">Son 7 Günlük Veri Akışı</h2>
+                <p className="text-xs text-slate-400">Günlük yükleme hacimleri (MB/GB)</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="h-64 w-full pt-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={analyticsData.last7Days} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis dataKey="day" stroke="#64748b" fontSize={11} tickLine={false} />
+                <YAxis stroke="#64748b" fontSize={10} tickLine={false} unit=" MB" />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#090d18', 
+                    borderColor: 'rgba(255,255,255,0.1)', 
+                    borderRadius: '12px',
+                    fontSize: '12px'
+                  }}
+                  itemStyle={{ color: '#f1f5f9' }}
+                />
+                <Bar 
+                  dataKey="uploadMB" 
+                  name="Yüklenen Veri (MB)" 
+                  fill="#a855f7" 
+                  radius={[6, 6, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
       </div>
 
       {/* 📊 DAILY TRANSFERS ANALYTICS & SEARCH CONSOLE */}
@@ -214,7 +406,6 @@ export default function OverviewTab({ stats, onNavigate }) {
         {/* 4 Daily Metric Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
-          {/* Card 1: Completed Today */}
           <div className="p-4.5 rounded-2xl bg-[#090c14]/70 border border-emerald-500/25 flex items-center justify-between shadow-sm hover:border-emerald-500/40 transition">
             <div>
               <span className="text-xs font-bold text-slate-400 block">Bugün Tamamlanan</span>
@@ -226,7 +417,6 @@ export default function OverviewTab({ stats, onNavigate }) {
             </div>
           </div>
 
-          {/* Card 2: Ongoing Transfers */}
           <div className="p-4.5 rounded-2xl bg-[#090c14]/70 border border-indigo-500/25 flex items-center justify-between shadow-sm hover:border-indigo-500/40 transition">
             <div>
               <span className="text-xs font-bold text-slate-400 block">Devam Edenler</span>
@@ -238,7 +428,6 @@ export default function OverviewTab({ stats, onNavigate }) {
             </div>
           </div>
 
-          {/* Card 3: Failed Transfers */}
           <div className="p-4.5 rounded-2xl bg-[#090c14]/70 border border-rose-500/25 flex items-center justify-between shadow-sm hover:border-rose-500/40 transition">
             <div>
               <span className="text-xs font-bold text-slate-400 block">Hata Alanlar</span>
@@ -250,7 +439,6 @@ export default function OverviewTab({ stats, onNavigate }) {
             </div>
           </div>
 
-          {/* Card 4: Total Active Users Today */}
           <div className="p-4.5 rounded-2xl bg-[#090c14]/70 border border-purple-500/25 flex items-center justify-between shadow-sm hover:border-purple-500/40 transition">
             <div>
               <span className="text-xs font-bold text-slate-400 block">Tekil Kullanıcılar</span>
@@ -269,7 +457,6 @@ export default function OverviewTab({ stats, onNavigate }) {
         {/* Filter & Live Search Bar */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-2">
           
-          {/* Live Search Input */}
           <div className="relative w-full md:w-96">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
             <input 
@@ -286,7 +473,6 @@ export default function OverviewTab({ stats, onNavigate }) {
             )}
           </div>
 
-          {/* Status Filter Buttons */}
           <div className="flex items-center space-x-1.5 bg-[#080b13] p-1.5 rounded-xl border border-slate-800/80 overflow-x-auto">
             {[
               { id: 'ALL', label: 'Tümü' },
@@ -504,7 +690,7 @@ export default function OverviewTab({ stats, onNavigate }) {
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tahsis Edilen Kota</span>
             <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition duration-200">
-              <PieChart className="w-5 h-5" />
+              <PieChartIcon className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-4">
@@ -565,7 +751,7 @@ export default function OverviewTab({ stats, onNavigate }) {
         <div className="glass-panel p-6 space-y-4">
           <div className="flex items-center space-x-2.5 pb-4 border-b border-white/[0.08]">
             <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
-              <PieChart className="w-4 h-4" />
+              <PieChartIcon className="w-4 h-4" />
             </div>
             <h2 className="font-bold text-lg text-white">Dosya Dağılımı</h2>
           </div>
@@ -605,7 +791,7 @@ export default function OverviewTab({ stats, onNavigate }) {
               })
             ) : (
               <div className="text-center py-16 text-slate-500 space-y-2">
-                <PieChart className="w-8 h-8 mx-auto text-slate-700" />
+                <PieChartIcon className="w-8 h-8 mx-auto text-slate-700" />
                 <p className="text-sm font-medium">Kayıtlı dosya türü yok.</p>
               </div>
             )}

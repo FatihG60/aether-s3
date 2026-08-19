@@ -5,6 +5,49 @@ import { liveUploadSessions } from './objectRoutes.js';
 
 const router = express.Router();
 
+// Real-Time Ingress & Egress Bandwidth Rolling Registry
+let currentSecondIngress = 0;
+let currentSecondEgress = 0;
+
+// Rolling 60-second timeline (samples every 1s)
+const rollingTimeline = [];
+for (let i = 59; i >= 0; i--) {
+  const d = new Date(Date.now() - i * 1000);
+  rollingTimeline.push({
+    time: d.toLocaleTimeString('tr-TR'),
+    ingressMB: 0,
+    egressMB: 0
+  });
+}
+
+// Every 1 second, sample current ingress & egress and rotate rolling array
+setInterval(() => {
+  const timeStr = new Date().toLocaleTimeString('tr-TR');
+  const ingressMB = parseFloat((currentSecondIngress / (1024 * 1024)).toFixed(2));
+  const egressMB = parseFloat((currentSecondEgress / (1024 * 1024)).toFixed(2));
+
+  rollingTimeline.push({
+    time: timeStr,
+    ingressMB,
+    egressMB
+  });
+
+  if (rollingTimeline.length > 60) {
+    rollingTimeline.shift();
+  }
+
+  currentSecondIngress = 0;
+  currentSecondEgress = 0;
+}, 1000);
+
+export function recordBandwidthIngress(bytes) {
+  currentSecondIngress += (bytes || 0);
+}
+
+export function recordBandwidthEgress(bytes) {
+  currentSecondEgress += (bytes || 0);
+}
+
 // GET /api/stats - Global storage metrics and analytics
 router.get('/stats', async (req, res) => {
   try {
@@ -39,6 +82,66 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// GET /api/stats/bandwidth-history - Real-time Bandwidth Timeline & 7-Day Storage Flow
+router.get('/stats/bandwidth-history', async (req, res) => {
+  try {
+    const buckets = await query(`SELECT * FROM BUCKETS`);
+    const objects = await query(`SELECT * FROM OBJECTS WHERE is_deleted = 0`);
+    const transferSessions = await query(`SELECT * FROM TRANSFER_SESSIONS`);
+
+    // 1. Bucket distribution for Chart
+    const bucketDistribution = buckets.map(b => {
+      const bObjs = objects.filter(o => o.bucket_name === b.name);
+      const totalBytes = bObjs.reduce((acc, curr) => acc + (curr.size_bytes || 0), 0);
+      return {
+        name: b.name,
+        sizeBytes: totalBytes,
+        sizeMB: parseFloat((totalBytes / (1024 * 1024)).toFixed(2)),
+        objectCount: bObjs.length
+      };
+    });
+
+    // 2. Last 7-day daily transfer flow
+    const last7Days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayName = d.toLocaleDateString('tr-TR', { weekday: 'short' });
+
+      // Calculate total uploaded on that date
+      const dayObjects = objects.filter(o => (o.created_at || '').startsWith(dateStr));
+      const dayTransfers = transferSessions.filter(s => (s.created_at || s.updated_at || '').startsWith(dateStr));
+
+      const dayUploadedBytes = dayObjects.reduce((acc, curr) => acc + (curr.size_bytes || 0), 0) +
+        dayTransfers.reduce((acc, curr) => acc + (curr.uploaded_bytes || 0), 0);
+
+      last7Days.push({
+        date: dateStr,
+        day: dayName,
+        uploadMB: parseFloat((dayUploadedBytes / (1024 * 1024)).toFixed(1)),
+        uploadGB: parseFloat((dayUploadedBytes / (1024 * 1024 * 1024)).toFixed(2)),
+        objectCount: dayObjects.length
+      });
+    }
+
+    // Peak Speed in last 60 seconds
+    const peakIngressMB = Math.max(...rollingTimeline.map(p => p.ingressMB), 0);
+    const peakEgressMB = Math.max(...rollingTimeline.map(p => p.egressMB), 0);
+
+    res.json({
+      success: true,
+      liveTimeline: rollingTimeline,
+      last7Days,
+      bucketDistribution,
+      peakIngressMB,
+      peakEgressMB
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/stats/daily-transfers & /api/daily-transfers - Filterable Daily Transfer Sessions & Metrics
 const handleDailyTransfers = async (req, res) => {
   try {
@@ -66,13 +169,13 @@ const handleDailyTransfers = async (req, res) => {
         uploadedBytes: isCompleted ? fSize : (s.uploaded_bytes || 0),
         completedChunks: isCompleted ? tChunks : (s.completed_chunks || 0),
         totalChunks: tChunks,
-        status: s.status, // 'COMPLETED', 'IN_PROGRESS', 'FAILED'
+        status: s.status,
         createdAt: s.created_at,
         updatedAt: s.updated_at || s.created_at
       });
     });
 
-    // 2. Include all uploaded OBJECTS as Completed Sessions for 100% accuracy
+    // 2. Include all uploaded OBJECTS as Completed Sessions
     dbObjects.forEach(obj => {
       const objectSessionId = `object_${obj.id}_${obj.object_key}`;
       const existsInSessions = Array.from(sessionMap.values()).some(
@@ -122,14 +225,12 @@ const handleDailyTransfers = async (req, res) => {
 
     let mergedList = Array.from(sessionMap.values());
 
-    // Filter by Date (default: Today YYYY-MM-DD)
     const targetDateStr = date || new Date().toISOString().split('T')[0];
     const todaySessions = mergedList.filter(s => {
       const sDate = (s.updatedAt || s.createdAt || '').split('T')[0];
       return sDate === targetDateStr;
     });
 
-    // Calculate Today's Aggregated Metrics
     const todayCompleted = todaySessions.filter(s => s.status === 'COMPLETED');
     const todayOngoing = todaySessions.filter(s => s.status === 'IN_PROGRESS');
     const todayFailed = todaySessions.filter(s => s.status === 'FAILED');
@@ -138,7 +239,6 @@ const handleDailyTransfers = async (req, res) => {
     const todayOngoingBytes = todayOngoing.reduce((acc, curr) => acc + (curr.uploadedBytes || 0), 0);
     const todayTotalTransferredBytes = todaySessions.reduce((acc, curr) => acc + (curr.uploadedBytes || curr.fileSize || 0), 0);
 
-    // Apply Live Search Filter (user_id, file_name, object_key)
     let filtered = [...todaySessions];
 
     if (search.trim()) {
@@ -150,7 +250,6 @@ const handleDailyTransfers = async (req, res) => {
       );
     }
 
-    // Apply Status Filter
     if (status !== 'ALL') {
       filtered = filtered.filter(s => s.status === status);
     }

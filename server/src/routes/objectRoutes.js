@@ -10,6 +10,7 @@ import Jimp from 'jimp';
 import { v4 as uuidv4 } from 'uuid';
 import { query, get, run, logActivity } from '../db/database.js';
 import { saveObjectFile, deleteObjectFile, streamPartialFile, calculateMD5, getBucketDir } from '../services/storageEngine.js';
+import { recordBandwidthIngress, recordBandwidthEgress } from './statsRoutes.js';
 
 const router = express.Router();
 const upload = multer({ dest: path.join(process.cwd(), 'data/temp') });
@@ -79,16 +80,13 @@ router.get('/buckets/:bucket/objects', async (req, res) => {
 
       allObjects.forEach(obj => {
         const key = obj.object_key;
-        // Strip the query prefix from start
         const relativeKey = prefix ? key.slice(prefix.length) : key;
         const slashIndex = relativeKey.indexOf('/');
 
         if (slashIndex !== -1) {
-          // This is inside a subfolder
           const folderName = relativeKey.slice(0, slashIndex + 1);
           commonPrefixesSet.add(prefix + folderName);
         } else {
-          // Direct file in current folder
           directObjects.push(obj);
         }
       });
@@ -154,6 +152,7 @@ router.post('/storage/:bucket/upload', upload.single('file'), async (req, res) =
     const isPublic = req.body.is_public === 'true' || req.body.is_public === '1' ? 1 : bucket.is_public;
 
     const savedInfo = await saveObjectFile(bucketName, objectKey, file.path);
+    recordBandwidthIngress(savedInfo.sizeBytes);
 
     const existing = await get(
       `SELECT id, file_path, version_id FROM objects WHERE bucket_name = ? AND object_key = ? INCLUDING_DELETED`,
@@ -287,6 +286,8 @@ router.post('/storage/:bucket/multipart/chunk', upload.single('chunk'), async (r
     const chunkTarget = path.join(uploadDir, `chunk_${chunkIndex}`);
     await fs.promises.copyFile(file.path, chunkTarget);
     try { await fs.promises.unlink(file.path); } catch (_) {}
+
+    recordBandwidthIngress(file.size);
 
     // Telemetry Update
     const session = liveUploadSessions.get(uploadId);
@@ -502,6 +503,8 @@ router.get('/storage/:bucket/zip-extract', async (req, res) => {
     const baseFileName = path.basename(entryName);
     const mimeType = mime.lookup(baseFileName) || 'application/octet-stream';
 
+    recordBandwidthEgress(fileBuffer.length);
+
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(baseFileName)}"`);
     res.setHeader('Content-Length', fileBuffer.length);
@@ -526,7 +529,6 @@ router.post('/storage/:bucket/move', async (req, res) => {
 
     const destBucket = new_bucket || currentBucket;
 
-    // Check source object
     const sourceObj = await get(
       `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
       [currentBucket, source_key]
@@ -536,7 +538,6 @@ router.post('/storage/:bucket/move', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Source object not found' });
     }
 
-    // Prepare destination file path
     const destBucketDir = getBucketDir(destBucket);
     const normalizedDestKey = target_key.replace(/\\/g, '/').replace(/^\/+/, '');
     const newFilePath = path.join(destBucketDir, normalizedDestKey);
@@ -546,14 +547,12 @@ router.post('/storage/:bucket/move', async (req, res) => {
       await fs.promises.mkdir(newFileDir, { recursive: true });
     }
 
-    // Move physical file on disk (fast zero-byte network overhead)
     await fs.promises.copyFile(sourceObj.file_path, newFilePath);
     try { await fs.promises.unlink(sourceObj.file_path); } catch (_) {}
 
     const newFileName = path.basename(normalizedDestKey);
     const newContentType = mime.lookup(newFileName) || sourceObj.content_type;
 
-    // Update database record
     await run(
       `UPDATE objects SET bucket_name = ?, object_key = ?, file_name = ?, file_path = ?, content_type = ? WHERE id = ?`,
       [destBucket, normalizedDestKey, newFileName, newFilePath, newContentType, sourceObj.id]
@@ -593,7 +592,6 @@ router.get('/storage/:bucket/thumbnail/*', async (req, res) => {
 
     const isImage = object.content_type && object.content_type.startsWith('image/');
     if (!isImage || object.content_type.includes('svg')) {
-      // For non-images or SVG, serve original directly
       return streamPartialFile(req, res, object.file_path, object.content_type);
     }
 
@@ -606,7 +604,6 @@ router.get('/storage/:bucket/thumbnail/*', async (req, res) => {
       return fs.createReadStream(thumbPath).pipe(res);
     }
 
-    // Generate 160x160 thumbnail with Jimp
     try {
       const image = await Jimp.read(object.file_path);
       await image
@@ -618,7 +615,6 @@ router.get('/storage/:bucket/thumbnail/*', async (req, res) => {
       res.setHeader('Cache-Control', 'public, max-age=86400');
       fs.createReadStream(thumbPath).pipe(res);
     } catch (jimpErr) {
-      // Fallback to original file if thumbnail generation fails
       streamPartialFile(req, res, object.file_path, object.content_type);
     }
   } catch (err) {
@@ -649,6 +645,7 @@ router.post('/storage/:bucket/download-zip', async (req, res) => {
         [bucketName, key]
       );
       if (object && fs.existsSync(object.file_path)) {
+        recordBandwidthEgress(object.size_bytes);
         archive.file(object.file_path, { name: object.object_key });
       }
     }
@@ -710,6 +707,8 @@ router.get('/storage/:bucket/*', async (req, res) => {
     if (!object || !fs.existsSync(object.file_path)) {
       return res.status(404).json({ success: false, error: 'Object not found' });
     }
+
+    recordBandwidthEgress(object.size_bytes);
 
     res.setHeader('ETag', object.etag);
     res.setHeader('Accept-Ranges', 'bytes');
