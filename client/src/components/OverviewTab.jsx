@@ -454,6 +454,65 @@ export default function OverviewTab({ stats, onNavigate }) {
 
         </div>
 
+        {/* ⚡ DOSYA BOYUTU VS TRANSFER SÜRESİ KORELASYON İSTATİSTİKLERİ & GRAFİĞİ */}
+        <div className="p-6 rounded-2xl bg-[#080b13]/80 border border-indigo-500/20 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.06]">
+            <div className="flex items-center space-x-2.5">
+              <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+                <TrendingUp className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-white text-base">Dosya Boyutu vs Transfer Süresi Analizi</h3>
+                <p className="text-xs text-slate-400">Dosya boyutlarının aktarım süresi ve efektif aktarım hızına (MB/s) etkisi</p>
+              </div>
+            </div>
+
+            {/* 3 Correlation Quick Badges */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="bg-[#05070d] border border-indigo-500/30 rounded-xl px-3 py-1.5 text-xs">
+                <span className="text-slate-400">Ort. Hız: </span>
+                <strong className="text-indigo-300 font-mono font-bold">{metrics.avgSpeedMBps || 0} MB/s</strong>
+              </div>
+              <div className="bg-[#05070d] border border-purple-500/30 rounded-xl px-3 py-1.5 text-xs">
+                <span className="text-slate-400">Ort. Süre: </span>
+                <strong className="text-purple-300 font-mono font-bold">{metrics.avgDurationSec || 0} sn</strong>
+              </div>
+              <div className="bg-[#05070d] border border-emerald-500/30 rounded-xl px-3 py-1.5 text-xs">
+                <span className="text-slate-400">En Hızlı: </span>
+                <strong className="text-emerald-300 font-mono font-bold">{metrics.maxSpeedMBps || 0} MB/s</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Size vs Duration Correlation Bar Chart */}
+          {metrics.sizeVsDurationPoints && metrics.sizeVsDurationPoints.length > 0 ? (
+            <div className="h-56 w-full pt-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={metrics.sizeVsDurationPoints.slice(0, 15)} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                  <XAxis dataKey="fileName" stroke="#64748b" fontSize={10} tickLine={false} />
+                  <YAxis yAxisId="left" stroke="#818cf8" fontSize={10} tickLine={false} unit=" MB" />
+                  <YAxis yAxisId="right" orientation="right" stroke="#34d399" fontSize={10} tickLine={false} unit="s" />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: '#090d18', 
+                      borderColor: 'rgba(255,255,255,0.1)', 
+                      borderRadius: '12px',
+                      fontSize: '12px'
+                    }}
+                    itemStyle={{ color: '#f1f5f9' }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '6px' }} />
+                  <Bar yAxisId="left" dataKey="sizeMB" name="Dosya Boyutu (MB)" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="right" dataKey="durationSec" name="Aktarım Süresi (Saniye)" fill="#10b981" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <p className="text-center py-8 text-xs text-slate-500 font-medium">Bugün henüz tamamlanmış bir dosya transferi bulunmuyor.</p>
+          )}
+        </div>
+
         {/* Filter & Live Search Bar */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-2">
           
@@ -514,14 +573,17 @@ export default function OverviewTab({ stats, onNavigate }) {
                   <th onClick={() => handleSort('fileSize')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
                     Transfer / Boyut {renderSortIcon('fileSize')}
                   </th>
+                  <th onClick={() => handleSort('durationSeconds')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Transfer Süresi & Hız {renderSortIcon('durationSeconds')}
+                  </th>
                   <th onClick={() => handleSort('status')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
                     Durum {renderSortIcon('status')}
                   </th>
                   <th onClick={() => handleSort('startedAt')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
-                    Başlama Tarih / Saat {renderSortIcon('startedAt')}
+                    Başlama {renderSortIcon('startedAt')}
                   </th>
                   <th onClick={() => handleSort('endedAt')} className="px-4 py-3.5 text-right cursor-pointer hover:text-white transition select-none">
-                    Bitiş Tarih / Saat {renderSortIcon('endedAt')}
+                    Bitiş {renderSortIcon('endedAt')}
                   </th>
                 </tr>
               </thead>
@@ -539,6 +601,12 @@ export default function OverviewTab({ stats, onNavigate }) {
                       : s.totalChunks > 0 
                       ? Math.min(100, Math.round((currentCompletedChunks / s.totalChunks) * 100))
                       : 0;
+
+                    const durationFormatted = s.durationSeconds < 1 
+                      ? '< 1 sn' 
+                      : s.durationSeconds > 60 
+                      ? `${Math.floor(s.durationSeconds / 60)} dk ${Math.round(s.durationSeconds % 60)} sn`
+                      : `${s.durationSeconds} sn`;
 
                     const startFormatted = s.startedAt 
                       ? new Date(s.startedAt).toLocaleString('tr-TR')
@@ -578,6 +646,12 @@ export default function OverviewTab({ stats, onNavigate }) {
                         <td className="px-4 py-4 font-mono whitespace-nowrap font-semibold">
                           <span className="text-slate-200">{formatBytes(currentUploadedBytes)}</span>
                           <span className="text-slate-400 text-[11px]"> / {formatBytes(s.fileSize)}</span>
+                        </td>
+                        <td className="px-4 py-4 font-mono whitespace-nowrap">
+                          <span className="text-indigo-300 font-bold">{durationFormatted}</span>
+                          {s.speedMBps > 0 && (
+                            <span className="text-slate-400 text-[11px] block mt-0.5 font-normal">({s.speedMBps} MB/s)</span>
+                          )}
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">
                           <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${

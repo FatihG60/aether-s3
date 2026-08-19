@@ -229,7 +229,22 @@ const handleDailyTransfers = async (req, res) => {
       });
     });
 
-    let mergedList = Array.from(sessionMap.values());
+    let mergedList = Array.from(sessionMap.values()).map(s => {
+      const startTimeMs = s.startedAt ? new Date(s.startedAt).getTime() : new Date(s.createdAt).getTime();
+      const isDone = s.status === 'COMPLETED';
+      const endTimeMs = s.endedAt ? new Date(s.endedAt).getTime() : (isDone ? (s.updatedAt ? new Date(s.updatedAt).getTime() : startTimeMs + 1000) : Date.now());
+      
+      const durationSeconds = Math.max(0.1, parseFloat(((endTimeMs - startTimeMs) / 1000).toFixed(1)));
+      const sizeMB = parseFloat(((s.fileSize || 0) / (1024 * 1024)).toFixed(2));
+      const speedMBps = parseFloat((sizeMB / durationSeconds).toFixed(2));
+
+      return {
+        ...s,
+        durationSeconds,
+        sizeMB,
+        speedMBps
+      };
+    });
 
     const targetDateStr = date || new Date().toISOString().split('T')[0];
     const todaySessions = mergedList.filter(s => {
@@ -244,6 +259,27 @@ const handleDailyTransfers = async (req, res) => {
     const todayCompletedBytes = todayCompleted.reduce((acc, curr) => acc + (curr.fileSize || 0), 0);
     const todayOngoingBytes = todayOngoing.reduce((acc, curr) => acc + (curr.uploadedBytes || 0), 0);
     const todayTotalTransferredBytes = todaySessions.reduce((acc, curr) => acc + (curr.uploadedBytes || curr.fileSize || 0), 0);
+
+    // Duration & Correlation Statistics
+    const avgDurationSec = todayCompleted.length > 0
+      ? parseFloat((todayCompleted.reduce((a, b) => a + b.durationSeconds, 0) / todayCompleted.length).toFixed(1))
+      : 0;
+
+    const avgSpeedMBps = todayCompleted.length > 0
+      ? parseFloat((todayCompleted.reduce((a, b) => a + b.speedMBps, 0) / todayCompleted.length).toFixed(2))
+      : 0;
+
+    const maxSpeedMBps = todayCompleted.length > 0
+      ? parseFloat(Math.max(...todayCompleted.map(s => s.speedMBps)).toFixed(2))
+      : 0;
+
+    // Size vs Duration points for chart
+    const sizeVsDurationPoints = todayCompleted.map(s => ({
+      fileName: s.fileName,
+      sizeMB: s.sizeMB,
+      durationSec: s.durationSeconds,
+      speedMBps: s.speedMBps
+    }));
 
     let filtered = [...todaySessions];
 
@@ -271,7 +307,11 @@ const handleDailyTransfers = async (req, res) => {
         todayOngoingCount: todayOngoing.length,
         todayOngoingBytes,
         todayFailedCount: todayFailed.length,
-        todayTotalTransferredBytes
+        todayTotalTransferredBytes,
+        avgDurationSec,
+        avgSpeedMBps,
+        maxSpeedMBps,
+        sizeVsDurationPoints
       },
       sessions: filtered
     });
