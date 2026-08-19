@@ -67,7 +67,7 @@ export default function App() {
       />
 
       {/* Main Body */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 max-w-[1720px] w-full mx-auto px-4 sm:px-6 lg:px-10 py-8">
         {activeTab === 'overview' && (
           <OverviewTab 
             stats={stats} 
@@ -110,8 +110,8 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950 py-6 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4">
+      <footer className="border-t border-white/[0.06] bg-[#05070d] py-6 text-center text-xs text-slate-500">
+        <div className="max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-10">
           <p>© 2026 AETHER S3 Custom Object Storage Engine • %100 Özel S3 Motoru ve Web UI Dashboard</p>
         </div>
       </footer>
