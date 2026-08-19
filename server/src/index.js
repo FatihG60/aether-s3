@@ -11,6 +11,7 @@ import objectRoutes from './routes/objectRoutes.js';
 import presignedRoutes from './routes/presignedRoutes.js';
 import statsRoutes from './routes/statsRoutes.js';
 import s3StandardRoutes from './routes/s3StandardRoutes.js';
+import webhookRoutes from './routes/webhookRoutes.js';
 
 dotenv.config();
 
@@ -60,6 +61,7 @@ app.use('/api/buckets', bucketRoutes);
 app.use('/api', objectRoutes);
 app.use('/api/presigned', presignedRoutes);
 app.use('/api', statsRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // AWS S3 Standard REST XML Protocol Router (AWS CLI, Boto3, Cyberduck, Rclone)
 app.use('/', s3StandardRoutes);

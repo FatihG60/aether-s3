@@ -9,7 +9,8 @@ import {
   ShieldCheck,
   Zap,
   Activity,
-  Layers
+  Layers,
+  Webhook
 } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, stats }) {
@@ -19,6 +20,7 @@ export default function Navbar({ activeTab, setActiveTab, stats }) {
     { id: 'objects', label: 'Dosya Yöneticisi', icon: HardDrive, count: stats?.totalObjects },
     { id: 'presigned', label: 'İmzalı URL Üretici', icon: Link2, badge: 'HMAC' },
     { id: 'apikeys', label: 'API & SDK Erişim', icon: KeyRound, badge: 'Keys' },
+    { id: 'webhooks', label: 'Webhook & Bildirimler', icon: Webhook, badge: 'Events' },
   ];
 
   function formatBytes(bytes, decimals = 1) {

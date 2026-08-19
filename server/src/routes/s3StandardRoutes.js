@@ -7,6 +7,7 @@ import { XMLBuilder, XMLParser } from 'fast-xml-parser';
 import { query, get, run, logActivity } from '../db/database.js';
 import { saveObjectFile, deleteObjectFile, streamPartialFile, calculateMD5, getBucketDir } from '../services/storageEngine.js';
 import { recordBandwidthIngress, recordBandwidthEgress } from './statsRoutes.js';
+import { triggerWebhooks } from '../services/webhookDispatcher.js';
 
 const router = express.Router();
 const xmlParser = new XMLParser();
@@ -301,6 +302,15 @@ router.put('/:bucket/*', async (req, res, next) => {
 
       await logActivity('S3_PUT_OBJECT', bucketName, normalizedKey, `Uploaded via AWS S3 REST API (${totalBytes} bytes)`);
 
+      triggerWebhooks('s3:ObjectCreated:Put', {
+        bucketName,
+        objectKey: normalizedKey,
+        fileName,
+        sizeBytes: totalBytes,
+        userId,
+        etag
+      });
+
       res.setHeader('ETag', etag);
       res.status(200).end();
     });
@@ -329,6 +339,15 @@ router.delete('/:bucket/*', async (req, res, next) => {
       deleteObjectFile(object.file_path);
       await run(`DELETE FROM OBJECTS WHERE id = ?`, [object.id]);
       await logActivity('S3_DELETE_OBJECT', bucketName, objectKey, 'Deleted via AWS S3 REST API');
+
+      triggerWebhooks('s3:ObjectRemoved:Delete', {
+        bucketName,
+        objectKey,
+        fileName: object.file_name,
+        sizeBytes: object.size_bytes,
+        userId: object.user_id,
+        etag: object.etag
+      });
     }
 
     res.status(204).end();

@@ -20,7 +20,8 @@ let state = {
   transfer_sessions: [],
   api_keys: [],
   presigned_urls: [],
-  activity_logs: []
+  activity_logs: [],
+  webhooks: []
 };
 
 // Save DB state to file asynchronously
@@ -46,6 +47,7 @@ function loadState() {
   // Ensure arrays exist
   if (!state.object_versions) state.object_versions = [];
   if (!state.transfer_sessions) state.transfer_sessions = [];
+  if (!state.webhooks) state.webhooks = [];
 
   // Migration for objects schema
   state.objects.forEach(obj => {
@@ -162,6 +164,10 @@ export async function query(sql, params = []) {
     return [...state.api_keys];
   }
 
+  if (cleanSql.includes('FROM WEBHOOKS')) {
+    return [...state.webhooks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }
+
   if (cleanSql.includes('FROM ACTIVITY_LOGS')) {
     return [...state.activity_logs].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   }
@@ -171,6 +177,11 @@ export async function query(sql, params = []) {
 
 export async function get(sql, params = []) {
   const cleanSql = sql.trim().toUpperCase();
+
+  if (cleanSql.includes('FROM WEBHOOKS')) {
+    const id = parseInt(params[0], 10);
+    return state.webhooks.find(w => w.id === id) || null;
+  }
 
   if (cleanSql.includes('FROM BUCKETS')) {
     const bucketName = params[0];
@@ -427,6 +438,47 @@ export async function run(sql, params = []) {
     });
     saveState();
     return { lastID: newId, changes: 1 };
+  }
+
+  if (cleanSql.startsWith('INSERT INTO WEBHOOKS')) {
+    const [name, target_url, events, format, is_active] = params;
+    const newId = state.webhooks.length > 0 ? Math.max(...state.webhooks.map(w => w.id)) + 1 : 1;
+    state.webhooks.push({
+      id: newId,
+      name: name || 'Custom Webhook',
+      target_url,
+      events: events || 's3:ObjectCreated:*',
+      format: format || 'standard_s3_json',
+      is_active: is_active === undefined ? 1 : is_active,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+    saveState();
+    return { lastID: newId, changes: 1 };
+  }
+
+  if (cleanSql.startsWith('UPDATE WEBHOOKS')) {
+    const [name, target_url, events, format, is_active, id] = params;
+    const webhook = state.webhooks.find(w => w.id === parseInt(id, 10));
+    if (webhook) {
+      if (name !== undefined) webhook.name = name;
+      if (target_url !== undefined) webhook.target_url = target_url;
+      if (events !== undefined) webhook.events = events;
+      if (format !== undefined) webhook.format = format;
+      if (is_active !== undefined) webhook.is_active = is_active;
+      webhook.updated_at = new Date().toISOString();
+      saveState();
+      return { changes: 1 };
+    }
+    return { changes: 0 };
+  }
+
+  if (cleanSql.startsWith('DELETE FROM WEBHOOKS')) {
+    const id = parseInt(params[0], 10);
+    const initial = state.webhooks.length;
+    state.webhooks = state.webhooks.filter(w => w.id !== id);
+    saveState();
+    return { changes: initial - state.webhooks.length };
   }
 
   return { changes: 0 };

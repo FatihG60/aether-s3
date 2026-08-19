@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { query, get, run, logActivity } from '../db/database.js';
 import { saveObjectFile, deleteObjectFile, streamPartialFile, calculateMD5, getBucketDir } from '../services/storageEngine.js';
 import { recordBandwidthIngress, recordBandwidthEgress } from './statsRoutes.js';
+import { triggerWebhooks } from '../services/webhookDispatcher.js';
 
 const router = express.Router();
 const upload = multer({ dest: path.join(process.cwd(), 'data/temp') });
@@ -186,6 +187,15 @@ router.post('/storage/:bucket/upload', upload.single('file'), async (req, res) =
     );
 
     await logActivity('UPLOAD_OBJECT', bucketName, objectKey, `Size: ${savedInfo.sizeBytes} bytes, StructuredPath: ${useStructuredPath}`);
+
+    triggerWebhooks('s3:ObjectCreated:Put', {
+      bucketName,
+      objectKey,
+      fileName: file.originalname,
+      sizeBytes: savedInfo.sizeBytes,
+      userId,
+      etag: savedInfo.etag
+    });
 
     const objectMeta = await get(
       `SELECT * FROM objects WHERE bucket_name = ? AND object_key = ?`,
@@ -399,6 +409,15 @@ router.post('/storage/:bucket/multipart/complete', async (req, res) => {
 
     await logActivity('MULTIPART_UPLOAD_COMPLETE', bucketName, normalizedKey, `Fast-merged ${files.length} chunks, Size: ${totalSizeBytes} bytes`);
 
+    triggerWebhooks('s3:ObjectCreated:CompleteMultipartUpload', {
+      bucketName,
+      objectKey: normalizedKey,
+      fileName: file_name || normalizedKey,
+      sizeBytes: totalSizeBytes,
+      userId: user_id || 'user_default',
+      etag
+    });
+
     // Update telemetry memory & DB state
     const session = liveUploadSessions.get(uploadId);
     if (session) {
@@ -560,6 +579,15 @@ router.post('/storage/:bucket/move', async (req, res) => {
 
     await logActivity('MOVE_OBJECT', currentBucket, source_key, `Moved to ${destBucket}/${normalizedDestKey}`);
 
+    triggerWebhooks('s3:ObjectMoved', {
+      bucketName: destBucket,
+      objectKey: normalizedDestKey,
+      fileName: newFileName,
+      sizeBytes: sourceObj.size_bytes,
+      userId: sourceObj.user_id,
+      etag: sourceObj.etag
+    });
+
     const updatedObj = await get(`SELECT * FROM objects WHERE id = ?`, [sourceObj.id]);
 
     res.json({
@@ -675,6 +703,15 @@ router.post('/storage/:bucket/restore', async (req, res) => {
     await run(`UPDATE objects SET IS_DELETED = 0 WHERE id = ?`, [object.id]);
     await logActivity('RESTORE_OBJECT', bucketName, object_key, `Object restored from Trash Bin`);
 
+    triggerWebhooks('s3:ObjectRestored', {
+      bucketName,
+      objectKey: object.object_key,
+      fileName: object.file_name,
+      sizeBytes: object.size_bytes,
+      userId: object.user_id,
+      etag: object.etag
+    });
+
     res.json({ success: true, message: `Object ${object_key} restored successfully` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -740,6 +777,15 @@ router.delete('/storage/:bucket/*', async (req, res) => {
     if (!object) {
       return res.status(404).json({ success: false, error: 'Object not found' });
     }
+
+    triggerWebhooks(isPermanent ? 's3:ObjectRemoved:PermanentDelete' : 's3:ObjectRemoved:SoftDelete', {
+      bucketName,
+      objectKey,
+      fileName: object.file_name,
+      sizeBytes: object.size_bytes,
+      userId: object.user_id,
+      etag: object.etag
+    });
 
     if (isPermanent) {
       deleteObjectFile(object.file_path);

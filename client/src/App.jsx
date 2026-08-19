@@ -5,6 +5,7 @@ import BucketsTab from './components/BucketsTab';
 import ObjectsTab from './components/ObjectsTab';
 import PresignedTab from './components/PresignedTab';
 import ApiKeysTab from './components/ApiKeysTab';
+import WebhooksTab from './components/WebhooksTab';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -101,6 +102,10 @@ export default function App() {
 
         {activeTab === 'apikeys' && (
           <ApiKeysTab />
+        )}
+
+        {activeTab === 'webhooks' && (
+          <WebhooksTab />
         )}
       </main>
 
