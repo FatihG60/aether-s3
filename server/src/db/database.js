@@ -55,6 +55,14 @@ function loadState() {
     if (!obj.version_id) obj.version_id = 'v1';
   });
 
+  // Migration for transfer_sessions schema
+  state.transfer_sessions.forEach(s => {
+    if (!s.started_at) s.started_at = s.created_at || new Date().toISOString();
+    if (!s.ended_at && (s.status === 'COMPLETED' || s.status === 'TAMAMLANDI')) {
+      s.ended_at = s.updated_at || s.created_at || new Date().toISOString();
+    }
+  });
+
   saveState();
 }
 
@@ -263,9 +271,13 @@ export async function run(sql, params = []) {
   if (cleanSql.startsWith('INSERT INTO TRANSFER_SESSIONS')) {
     const [upload_id, user_id, bucket_name, object_key, file_name, file_size, total_chunks, status] = params;
     const existing = state.transfer_sessions.find(s => s.upload_id === upload_id);
+    const now = new Date().toISOString();
     if (existing) {
       existing.status = status;
-      existing.updated_at = new Date().toISOString();
+      existing.updated_at = now;
+      if (status === 'COMPLETED' || status === 'FAILED') {
+        existing.ended_at = now;
+      }
       saveState();
       return { changes: 1 };
     }
@@ -283,8 +295,10 @@ export async function run(sql, params = []) {
       total_chunks: total_chunks || 1,
       status: status || 'IN_PROGRESS',
       error_message: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      started_at: now,
+      ended_at: (status === 'COMPLETED' ? now : null),
+      created_at: now,
+      updated_at: now
     });
     saveState();
     return { lastID: newId, changes: 1 };
@@ -298,6 +312,9 @@ export async function run(sql, params = []) {
       if (uploaded_bytes !== undefined) session.uploaded_bytes = uploaded_bytes;
       if (completed_chunks !== undefined) session.completed_chunks = completed_chunks;
       session.updated_at = new Date().toISOString();
+      if (status === 'COMPLETED' || status === 'FAILED') {
+        session.ended_at = new Date().toISOString();
+      }
       saveState();
       return { changes: 1 };
     }

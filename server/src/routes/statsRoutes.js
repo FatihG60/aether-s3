@@ -170,6 +170,8 @@ const handleDailyTransfers = async (req, res) => {
         completedChunks: isCompleted ? tChunks : (s.completed_chunks || 0),
         totalChunks: tChunks,
         status: s.status,
+        startedAt: s.started_at || s.created_at,
+        endedAt: s.ended_at || (isCompleted ? (s.updated_at || s.created_at) : null),
         createdAt: s.created_at,
         updatedAt: s.updated_at || s.created_at
       });
@@ -194,6 +196,8 @@ const handleDailyTransfers = async (req, res) => {
           completedChunks: 1,
           totalChunks: 1,
           status: 'COMPLETED',
+          startedAt: obj.created_at,
+          endedAt: obj.updated_at || obj.created_at,
           createdAt: obj.created_at,
           updatedAt: obj.updated_at || obj.created_at
         });
@@ -218,6 +222,8 @@ const handleDailyTransfers = async (req, res) => {
         totalChunks: tChunks,
         status: isCompleted ? 'COMPLETED' : ms.status === 'HATA' ? 'FAILED' : 'IN_PROGRESS',
         speedBytesPerSec: ms.speedBytesPerSec || 0,
+        startedAt: new Date(ms.startTime).toISOString(),
+        endedAt: isCompleted ? new Date(ms.lastUpdated).toISOString() : null,
         createdAt: new Date(ms.startTime).toISOString(),
         updatedAt: new Date(ms.lastUpdated).toISOString()
       });

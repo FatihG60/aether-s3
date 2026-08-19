@@ -502,23 +502,26 @@ export default function OverviewTab({ stats, onNavigate }) {
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-[#05070c] text-slate-400 uppercase tracking-wider font-bold border-b border-white/[0.08] text-[11px]">
                 <tr>
-                  <th onClick={() => handleSort('userId')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                  <th onClick={() => handleSort('userId')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
                     Kullanıcı (User ID) {renderSortIcon('userId')}
                   </th>
-                  <th onClick={() => handleSort('fileName')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                  <th onClick={() => handleSort('fileName')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
                     Dosya Adı & Object Key {renderSortIcon('fileName')}
                   </th>
-                  <th onClick={() => handleSort('completedChunks')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                  <th onClick={() => handleSort('completedChunks')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
                     İlerleme / Parçalar {renderSortIcon('completedChunks')}
                   </th>
-                  <th onClick={() => handleSort('fileSize')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
-                    Transfer Edilen / Toplam {renderSortIcon('fileSize')}
+                  <th onClick={() => handleSort('fileSize')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Transfer / Boyut {renderSortIcon('fileSize')}
                   </th>
-                  <th onClick={() => handleSort('status')} className="px-5 py-3.5 cursor-pointer hover:text-white transition select-none">
+                  <th onClick={() => handleSort('status')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
                     Durum {renderSortIcon('status')}
                   </th>
-                  <th onClick={() => handleSort('updatedAt')} className="px-5 py-3.5 text-right cursor-pointer hover:text-white transition select-none">
-                    Tarih / Saat {renderSortIcon('updatedAt')}
+                  <th onClick={() => handleSort('startedAt')} className="px-4 py-3.5 cursor-pointer hover:text-white transition select-none">
+                    Başlama Tarih / Saat {renderSortIcon('startedAt')}
+                  </th>
+                  <th onClick={() => handleSort('endedAt')} className="px-4 py-3.5 text-right cursor-pointer hover:text-white transition select-none">
+                    Bitiş Tarih / Saat {renderSortIcon('endedAt')}
                   </th>
                 </tr>
               </thead>
@@ -537,20 +540,32 @@ export default function OverviewTab({ stats, onNavigate }) {
                       ? Math.min(100, Math.round((currentCompletedChunks / s.totalChunks) * 100))
                       : 0;
 
+                    const startFormatted = s.startedAt 
+                      ? new Date(s.startedAt).toLocaleString('tr-TR')
+                      : '—';
+
+                    const endFormatted = s.endedAt 
+                      ? new Date(s.endedAt).toLocaleString('tr-TR')
+                      : isDone 
+                      ? (s.updatedAt ? new Date(s.updatedAt).toLocaleString('tr-TR') : '—')
+                      : isFailed 
+                      ? 'Kesildi ❌' 
+                      : 'Devam Ediyor ⏳';
+
                     return (
                       <tr key={s.uploadId} className="hover:bg-white/[0.02] transition duration-150">
-                        <td className="px-5 py-4 whitespace-nowrap">
+                        <td className="px-4 py-4 whitespace-nowrap">
                           <span className="bg-indigo-500/10 border border-indigo-500/25 text-indigo-300 font-mono text-xs font-bold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5">
                             <User className="w-3.5 h-3.5" />
                             <span>{s.userId || 'user_default'}</span>
                           </span>
                         </td>
-                        <td className="px-5 py-4 max-w-xs truncate">
+                        <td className="px-4 py-4 max-w-xs truncate">
                           <span className="font-bold text-white block truncate text-sm">{s.fileName}</span>
                           <span className="text-[11px] text-slate-400 font-mono block truncate">{s.objectKey}</span>
                         </td>
-                        <td className="px-5 py-4 font-mono">
-                          <div className="space-y-1 min-w-[120px]">
+                        <td className="px-4 py-4 font-mono">
+                          <div className="space-y-1 min-w-[110px]">
                             <div className="flex justify-between text-[11px] text-slate-400">
                               <span>Parça {currentCompletedChunks}/{s.totalChunks || 1}</span>
                               <span className="font-bold text-indigo-400">%{percent}</span>
@@ -560,11 +575,11 @@ export default function OverviewTab({ stats, onNavigate }) {
                             </div>
                           </div>
                         </td>
-                        <td className="px-5 py-4 font-mono whitespace-nowrap font-semibold">
+                        <td className="px-4 py-4 font-mono whitespace-nowrap font-semibold">
                           <span className="text-slate-200">{formatBytes(currentUploadedBytes)}</span>
-                          <span className="text-slate-400"> / {formatBytes(s.fileSize)}</span>
+                          <span className="text-slate-400 text-[11px]"> / {formatBytes(s.fileSize)}</span>
                         </td>
-                        <td className="px-5 py-4 whitespace-nowrap">
+                        <td className="px-4 py-4 whitespace-nowrap">
                           <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
                             isDone 
                               ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
@@ -575,8 +590,21 @@ export default function OverviewTab({ stats, onNavigate }) {
                             {isDone ? 'TAMAMLANDI' : isFailed ? 'HATALI' : 'DEVAM EDİYOR'}
                           </span>
                         </td>
-                        <td className="px-5 py-4 text-right font-mono text-[11px] text-slate-400 whitespace-nowrap">
-                          {new Date(s.updatedAt || s.createdAt).toLocaleTimeString('tr-TR')}
+                        <td className="px-4 py-4 font-mono text-[11px] text-slate-300 whitespace-nowrap">
+                          <span className="bg-[#090d18] border border-white/5 px-2 py-1 rounded">
+                            {startFormatted}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-right font-mono text-[11px] text-slate-300 whitespace-nowrap">
+                          <span className={`px-2 py-1 rounded border ${
+                            isDone 
+                              ? 'bg-emerald-950/40 text-emerald-300 border-emerald-500/30' 
+                              : isFailed
+                              ? 'bg-rose-950/40 text-rose-300 border-rose-500/30'
+                              : 'bg-indigo-950/40 text-indigo-300 border-indigo-500/30 animate-pulse'
+                          }`}>
+                            {endFormatted}
+                          </span>
                         </td>
                       </tr>
                     );
